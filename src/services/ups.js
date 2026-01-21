@@ -123,6 +123,9 @@ class UPSService {
           }
         },
         Shipment: {
+          ShipmentRatingOptions: {
+            NegotiatedRatesIndicator: ''
+          },
           Shipper: {
             ShipperNumber: process.env.UPS_ACCOUNT_NUMBER,
             Address: {
