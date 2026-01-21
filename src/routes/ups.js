@@ -22,7 +22,9 @@ router.post('/rate', async (req, res, next) => {
   try {
     const {
       shipFromPostalCode,
+      shipFromStateCode,
       shipToPostalCode,
+      shipToStateCode,
       weight,
       length,
       width,
@@ -34,13 +36,18 @@ router.post('/rate', async (req, res, next) => {
     if (!shipFromPostalCode || !shipToPostalCode) {
       return res.status(400).json({ error: 'Origin and destination postal codes required' });
     }
+    if (!shipFromStateCode || !shipToStateCode) {
+      return res.status(400).json({ error: 'Origin and destination state codes required (e.g., "MD", "CA")' });
+    }
     if (!weight || !length || !width || !height) {
       return res.status(400).json({ error: 'Package weight and dimensions required' });
     }
 
     const result = await upsService.getRate({
       shipFromPostalCode,
+      shipFromStateCode,
       shipToPostalCode,
+      shipToStateCode,
       weight,
       length,
       width,
@@ -77,7 +84,9 @@ router.post('/shop', async (req, res, next) => {
   try {
     const {
       shipFromPostalCode,
+      shipFromStateCode,
       shipToPostalCode,
+      shipToStateCode,
       weight,
       length,
       width,
@@ -88,13 +97,18 @@ router.post('/shop', async (req, res, next) => {
     if (!shipFromPostalCode || !shipToPostalCode) {
       return res.status(400).json({ error: 'Origin and destination postal codes required' });
     }
+    if (!shipFromStateCode || !shipToStateCode) {
+      return res.status(400).json({ error: 'Origin and destination state codes required (e.g., "MD", "CA")' });
+    }
     if (!weight || !length || !width || !height) {
       return res.status(400).json({ error: 'Package weight and dimensions required' });
     }
 
     const result = await upsService.shopRates({
       shipFromPostalCode,
+      shipFromStateCode,
       shipToPostalCode,
+      shipToStateCode,
       weight,
       length,
       width,

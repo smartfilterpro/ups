@@ -102,8 +102,10 @@ class UPSService {
   buildRateRequest(details) {
     const {
       shipFromPostalCode,
+      shipFromStateCode,
       shipFromCountryCode = 'US',
       shipToPostalCode,
+      shipToStateCode,
       shipToCountryCode = 'US',
       weight,
       weightUnit = 'LBS',
@@ -130,18 +132,21 @@ class UPSService {
             ShipperNumber: process.env.UPS_ACCOUNT_NUMBER,
             Address: {
               PostalCode: shipFromPostalCode,
+              StateProvinceCode: shipFromStateCode,
               CountryCode: shipFromCountryCode
             }
           },
           ShipTo: {
             Address: {
               PostalCode: shipToPostalCode,
+              StateProvinceCode: shipToStateCode,
               CountryCode: shipToCountryCode
             }
           },
           ShipFrom: {
             Address: {
               PostalCode: shipFromPostalCode,
+              StateProvinceCode: shipFromStateCode,
               CountryCode: shipFromCountryCode
             }
           },
