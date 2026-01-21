@@ -112,17 +112,21 @@ router.post('/shop', async (req, res, next) => {
 
     const rates = shipments.map(shipment => {
       const code = shipment.Service?.Code;
+      const negotiated = shipment.NegotiatedRateCharges?.TotalCharge?.MonetaryValue;
+      const published = shipment.TotalCharges?.MonetaryValue;
       return {
         service: SERVICE_CODES[code] || `Service ${code}`,
         serviceCode: code,
-        totalCharges: shipment.TotalCharges?.MonetaryValue,
+        totalCharges: negotiated || published,
+        publishedCharges: published,
+        negotiatedCharges: negotiated || null,
         currency: shipment.TotalCharges?.CurrencyCode,
         billingWeight: shipment.BillingWeight?.Weight,
         guaranteedDays: shipment.GuaranteedDelivery?.BusinessDaysInTransit || null
       };
     });
 
-    // Sort by price
+    // Sort by price (use negotiated if available)
     rates.sort((a, b) => parseFloat(a.totalCharges) - parseFloat(b.totalCharges));
 
     res.json({
