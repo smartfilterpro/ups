@@ -55,7 +55,7 @@ class UPSService {
 
     const requestBody = this.buildRateRequest(shipmentDetails);
 
-    const response = await fetch(`${this.getBaseUrl()}/api/rating/v1/Rate`, {
+    const response = await fetch(`${this.getBaseUrl()}/api/rating/v2409/Rate`, {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${token}`,
@@ -80,7 +80,7 @@ class UPSService {
     const requestBody = this.buildRateRequest(shipmentDetails);
 
     // Shop endpoint returns all available service rates
-    const response = await fetch(`${this.getBaseUrl()}/api/rating/v1/Shop`, {
+    const response = await fetch(`${this.getBaseUrl()}/api/rating/v2409/Shop`, {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${token}`,
