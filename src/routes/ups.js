@@ -144,6 +144,7 @@ router.post('/shop', async (req, res, next) => {
     rates.sort((a, b) => parseFloat(a.totalCharges) - parseFloat(b.totalCharges));
 
     res.json({
+      environment: process.env.UPS_ENVIRONMENT || 'sandbox',
       shipFrom: shipFromPostalCode,
       shipTo: shipToPostalCode,
       package: { weight, length, width, height },
@@ -162,6 +163,25 @@ router.post('/shop', async (req, res, next) => {
  */
 router.get('/services', (req, res) => {
   res.json(SERVICE_CODES);
+});
+
+/**
+ * GET /api/ups/debug
+ * Show current environment configuration
+ */
+router.get('/debug', (req, res) => {
+  const env = process.env.UPS_ENVIRONMENT || 'sandbox';
+  const baseUrl = env === 'production'
+    ? 'https://onlinetools.ups.com'
+    : 'https://wwwcie.ups.com';
+
+  res.json({
+    environment: env,
+    baseUrl: baseUrl,
+    accountNumber: process.env.UPS_ACCOUNT_NUMBER ? '***' + process.env.UPS_ACCOUNT_NUMBER.slice(-4) : 'NOT SET',
+    clientIdSet: !!process.env.UPS_CLIENT_ID,
+    clientSecretSet: !!process.env.UPS_CLIENT_SECRET
+  });
 });
 
 module.exports = router;
