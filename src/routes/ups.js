@@ -221,12 +221,22 @@ function packFiltersIntoBoxes(filters) {
 /**
  * POST /api/ups/quote
  * Get shipping quotes for multiple addresses with filter packing optimization
- * Input: { addresses: [...], filtersByAddress: [[...], [...]] }
- * addresses[i] pairs with filtersByAddress[i]
+ *
+ * Bubble-friendly format with parallel lists:
+ * {
+ *   "postalCodes": ["90210", "10001"],
+ *   "stateCodes": ["CA", "NY"],
+ *   "filterLengths": ["16,16", "20"],
+ *   "filterWidths": ["20,18", "25"],
+ *   "filterDepths": ["1,3", "2"]
+ * }
+ *
+ * Each index corresponds to one address.
+ * Filter dimensions are comma-separated within each string.
  */
 router.post('/quote', async (req, res, next) => {
   try {
-    const { addresses, filtersByAddress } = req.body;
+    const { postalCodes, stateCodes, filterLengths, filterWidths, filterDepths } = req.body;
 
     // Get ship-from from environment
     const shipFromPostalCode = process.env.SHIP_FROM_POSTAL_CODE;
@@ -238,34 +248,56 @@ router.post('/quote', async (req, res, next) => {
       });
     }
 
-    if (!addresses || !Array.isArray(addresses) || addresses.length === 0) {
-      return res.status(400).json({ error: 'addresses array is required' });
+    // Validate required arrays
+    if (!postalCodes || !Array.isArray(postalCodes) || postalCodes.length === 0) {
+      return res.status(400).json({ error: 'postalCodes array is required' });
+    }
+    if (!stateCodes || !Array.isArray(stateCodes)) {
+      return res.status(400).json({ error: 'stateCodes array is required' });
+    }
+    if (!filterLengths || !Array.isArray(filterLengths)) {
+      return res.status(400).json({ error: 'filterLengths array is required' });
+    }
+    if (!filterWidths || !Array.isArray(filterWidths)) {
+      return res.status(400).json({ error: 'filterWidths array is required' });
+    }
+    if (!filterDepths || !Array.isArray(filterDepths)) {
+      return res.status(400).json({ error: 'filterDepths array is required' });
     }
 
-    if (!filtersByAddress || !Array.isArray(filtersByAddress) || filtersByAddress.length === 0) {
-      return res.status(400).json({ error: 'filtersByAddress array is required' });
-    }
-
-    if (addresses.length !== filtersByAddress.length) {
+    // Check all arrays have same length
+    const len = postalCodes.length;
+    if (stateCodes.length !== len || filterLengths.length !== len ||
+        filterWidths.length !== len || filterDepths.length !== len) {
       return res.status(400).json({
-        error: `addresses and filtersByAddress must have same length. Got ${addresses.length} addresses and ${filtersByAddress.length} filter lists.`
+        error: `All arrays must have same length. Got postalCodes:${postalCodes.length}, stateCodes:${stateCodes.length}, filterLengths:${filterLengths.length}, filterWidths:${filterWidths.length}, filterDepths:${filterDepths.length}`
       });
     }
 
     const results = [];
     const serviceTotals = {};
 
-    for (let i = 0; i < addresses.length; i++) {
-      const address = addresses[i];
-      const filters = filtersByAddress[i];
+    for (let i = 0; i < len; i++) {
+      const postalCode = postalCodes[i];
+      const stateCode = stateCodes[i];
 
-      if (!address?.postalCode || !address?.stateCode) {
-        return res.status(400).json({ error: `Address at index ${i} requires postalCode and stateCode` });
+      // Parse comma-separated filter dimensions
+      const lengths = filterLengths[i].split(',').map(s => parseFloat(s.trim()));
+      const widths = filterWidths[i].split(',').map(s => parseFloat(s.trim()));
+      const depths = filterDepths[i].split(',').map(s => parseFloat(s.trim()));
+
+      if (lengths.length !== widths.length || lengths.length !== depths.length) {
+        return res.status(400).json({
+          error: `Filter dimensions mismatch at index ${i}. lengths:${lengths.length}, widths:${widths.length}, depths:${depths.length}`
+        });
       }
 
-      if (!filters || !Array.isArray(filters) || filters.length === 0) {
-        return res.status(400).json({ error: `filtersByAddress at index ${i} must be a non-empty array` });
-      }
+      // Build filters array
+      const filters = lengths.map((length, j) => ({
+        length,
+        width: widths[j],
+        depth: depths[j]
+      }));
 
       // Pack filters into boxes
       const boxes = packFiltersIntoBoxes(filters);
@@ -276,8 +308,8 @@ router.post('/quote', async (req, res, next) => {
         const result = await upsService.shopRates({
           shipFromPostalCode,
           shipFromStateCode,
-          shipToPostalCode: address.postalCode,
-          shipToStateCode: address.stateCode,
+          shipToPostalCode: postalCode,
+          shipToStateCode: stateCode,
           weight: box.weight,
           length: box.length,
           width: box.width,
@@ -325,7 +357,7 @@ router.post('/quote', async (req, res, next) => {
       }
 
       results.push({
-        address,
+        address: { postalCode, stateCode },
         boxes: boxes.map(b => ({ dimensions: b.dimensions, filterCount: b.filterCount, weight: b.weight })),
         rates: addressRates
       });
