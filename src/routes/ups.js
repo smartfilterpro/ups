@@ -333,16 +333,19 @@ function parseFilterSize(sizeStr) {
  * POST /api/ups/quote
  * Get shipping quotes for multiple addresses with filter packing optimization
  *
- * Bubble-friendly format:
+ * Simple format using || and | as separators:
  * {
- *   "addresses": "32-34 41st Street, Long Island City, NY, 11103-3582, 934 South Clinton Street, Baltimore, MD, 21224-5023",
- *   "filters": "(1)xxx - HVAC ID: LCC-XXX, (1)xxx - HVAC ID: LCC-YYY",
- *   "filterSizes": "16x20x1, 16x20x1"
+ *   "data": "Address1|16x20x1,16x20x2||Address2|20x25x1"
  * }
+ *
+ * Where:
+ * - || separates address groups
+ * - | separates address from its filter sizes
+ * - , separates filter sizes within an address
  */
 router.post('/quote', async (req, res, next) => {
   try {
-    const { addresses, filters, filterSizes } = req.body;
+    const { data } = req.body;
 
     // Get ship-from from environment
     const shipFromPostalCode = process.env.SHIP_FROM_POSTAL_CODE;
@@ -354,64 +357,56 @@ router.post('/quote', async (req, res, next) => {
       });
     }
 
-    if (!addresses || typeof addresses !== 'string') {
-      return res.status(400).json({ error: 'addresses string is required' });
-    }
-    if (!filters || typeof filters !== 'string') {
-      return res.status(400).json({ error: 'filters string is required' });
-    }
-    if (!filterSizes || typeof filterSizes !== 'string') {
-      return res.status(400).json({ error: 'filterSizes string is required' });
+    if (!data || typeof data !== 'string') {
+      return res.status(400).json({ error: 'data string is required' });
     }
 
-    // Parse addresses
-    const addressList = splitAddresses(addresses);
-    const parsedAddresses = addressList.map(a => parseAddress(a)).filter(a => a !== null);
+    // Split by || to get address groups
+    const addressGroups = data.split('||').map(g => g.trim()).filter(g => g.length > 0);
 
-    if (parsedAddresses.length === 0) {
-      return res.status(400).json({ error: 'Could not parse any addresses', raw: addresses });
+    if (addressGroups.length === 0) {
+      return res.status(400).json({ error: 'No address groups found in data' });
     }
-
-    // Parse filter sizes
-    const sizeList = filterSizes.split(',').map(s => parseFilterSize(s)).filter(s => s !== null);
-
-    // Parse and group filters by address
-    const filterGroups = parseFilters(filters);
-
-    // Validate counts
-    if (filterGroups.length !== parsedAddresses.length) {
-      return res.status(400).json({
-        error: `Address count (${parsedAddresses.length}) doesn't match filter groups (${filterGroups.length})`,
-        debug: {
-          rawAddresses: addresses,
-          splitAddresses: addressList,
-          parsedAddresses,
-          filterGroupCounts: filterGroups.map(g => g.length),
-          filterGroupHvacs: filterGroups.map(g => g.map(f => f.hvacId))
-        }
-      });
-    }
-
-    // Match filter sizes to filters (in order)
-    let sizeIndex = 0;
-    const addressShipments = parsedAddresses.map((addr, i) => {
-      const group = filterGroups[i];
-      const filtersWithSizes = group.map(() => {
-        const size = sizeList[sizeIndex] || { length: 16, width: 20, depth: 1 }; // Default if missing
-        sizeIndex++;
-        return size;
-      });
-      return { address: addr, filters: filtersWithSizes };
-    });
 
     const results = [];
     const serviceTotals = {};
 
-    for (const shipment of addressShipments) {
-      const { address, filters: shipmentFilters } = shipment;
+    for (const group of addressGroups) {
+      // Split by | to get address and filter sizes
+      const parts = group.split('|');
+      if (parts.length < 2) {
+        return res.status(400).json({
+          error: 'Each address group must have format: Address|size1,size2',
+          invalidGroup: group
+        });
+      }
+
+      const addressStr = parts[0].trim();
+      const sizesStr = parts.slice(1).join('|').trim(); // In case address has | in it
+
+      // Parse address to get state and zip
+      const address = parseAddress(addressStr);
+      if (!address) {
+        return res.status(400).json({
+          error: 'Could not parse address. Expected format: Street, City, ST, ZIPCODE',
+          invalidAddress: addressStr
+        });
+      }
+
+      // Parse filter sizes
+      const sizes = sizesStr.split(',')
+        .map(s => parseFilterSize(s.trim()))
+        .filter(s => s !== null);
+
+      if (sizes.length === 0) {
+        return res.status(400).json({
+          error: 'No valid filter sizes found',
+          invalidSizes: sizesStr
+        });
+      }
 
       // Pack filters into boxes
-      const boxes = packFiltersIntoBoxes(shipmentFilters);
+      const boxes = packFiltersIntoBoxes(sizes);
 
       // Get rates for each box
       const boxRates = [];
@@ -469,7 +464,7 @@ router.post('/quote', async (req, res, next) => {
 
       results.push({
         address,
-        filterCount: shipmentFilters.length,
+        filterCount: sizes.length,
         boxes: boxes.map(b => ({ dimensions: b.dimensions, filterCount: b.filterCount, weight: b.weight })),
         rates: addressRates
       });
