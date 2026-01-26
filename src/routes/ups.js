@@ -221,10 +221,12 @@ function packFiltersIntoBoxes(filters) {
 /**
  * POST /api/ups/quote
  * Get shipping quotes for multiple addresses with filter packing optimization
+ * Input: { addresses: [...], filtersByAddress: [[...], [...]] }
+ * addresses[i] pairs with filtersByAddress[i]
  */
 router.post('/quote', async (req, res, next) => {
   try {
-    const { shipments } = req.body;
+    const { addresses, filtersByAddress } = req.body;
 
     // Get ship-from from environment
     const shipFromPostalCode = process.env.SHIP_FROM_POSTAL_CODE;
@@ -236,22 +238,33 @@ router.post('/quote', async (req, res, next) => {
       });
     }
 
-    if (!shipments || !Array.isArray(shipments) || shipments.length === 0) {
-      return res.status(400).json({ error: 'shipments array is required' });
+    if (!addresses || !Array.isArray(addresses) || addresses.length === 0) {
+      return res.status(400).json({ error: 'addresses array is required' });
+    }
+
+    if (!filtersByAddress || !Array.isArray(filtersByAddress) || filtersByAddress.length === 0) {
+      return res.status(400).json({ error: 'filtersByAddress array is required' });
+    }
+
+    if (addresses.length !== filtersByAddress.length) {
+      return res.status(400).json({
+        error: `addresses and filtersByAddress must have same length. Got ${addresses.length} addresses and ${filtersByAddress.length} filter lists.`
+      });
     }
 
     const results = [];
     const serviceTotals = {};
 
-    for (const shipment of shipments) {
-      const { address, filters } = shipment;
+    for (let i = 0; i < addresses.length; i++) {
+      const address = addresses[i];
+      const filters = filtersByAddress[i];
 
       if (!address?.postalCode || !address?.stateCode) {
-        return res.status(400).json({ error: 'Each shipment requires address with postalCode and stateCode' });
+        return res.status(400).json({ error: `Address at index ${i} requires postalCode and stateCode` });
       }
 
       if (!filters || !Array.isArray(filters) || filters.length === 0) {
-        return res.status(400).json({ error: 'Each shipment requires a filters array' });
+        return res.status(400).json({ error: `filtersByAddress at index ${i} must be a non-empty array` });
       }
 
       // Pack filters into boxes
