@@ -333,19 +333,19 @@ function parseFilterSize(sizeStr) {
  * POST /api/ups/quote
  * Get shipping quotes for multiple addresses with filter packing optimization
  *
- * Simple format using || and | as separators:
+ * Simple Bubble-friendly format with two parallel strings:
  * {
- *   "data": "Address1|16x20x1,16x20x2||Address2|20x25x1"
+ *   "addresses": "addr1 ;; addr1 ;; addr2",
+ *   "sizes": "16x20x1, 16x20x2, 20x25x1"
  * }
  *
- * Where:
- * - || separates address groups
- * - | separates address from its filter sizes
- * - , separates filter sizes within an address
+ * - addresses: each filter's address, separated by " ;; " (address repeats for each filter at that address)
+ * - sizes: each filter's size, separated by ", "
+ * - The API groups filters by address automatically
  */
 router.post('/quote', async (req, res, next) => {
   try {
-    const { data } = req.body;
+    const { addresses, sizes } = req.body;
 
     // Get ship-from from environment
     const shipFromPostalCode = process.env.SHIP_FROM_POSTAL_CODE;
@@ -357,33 +357,49 @@ router.post('/quote', async (req, res, next) => {
       });
     }
 
-    if (!data || typeof data !== 'string') {
-      return res.status(400).json({ error: 'data string is required' });
+    if (!addresses || typeof addresses !== 'string') {
+      return res.status(400).json({ error: 'addresses string is required' });
+    }
+    if (!sizes || typeof sizes !== 'string') {
+      return res.status(400).json({ error: 'sizes string is required' });
     }
 
-    // Split by || to get address groups
-    const addressGroups = data.split('||').map(g => g.trim()).filter(g => g.length > 0);
+    // Split addresses by " ;; " (unique separator that won't appear in addresses)
+    const addressList = addresses.split(';;').map(a => a.trim());
 
-    if (addressGroups.length === 0) {
-      return res.status(400).json({ error: 'No address groups found in data' });
+    // Split sizes by ", "
+    const sizeList = sizes.split(',').map(s => s.trim());
+
+    if (addressList.length !== sizeList.length) {
+      return res.status(400).json({
+        error: `Address count (${addressList.length}) doesn't match size count (${sizeList.length})`,
+        debug: { addressCount: addressList.length, sizeCount: sizeList.length }
+      });
+    }
+
+    // Group filters by address
+    const addressGroups = {};
+    for (let i = 0; i < addressList.length; i++) {
+      const addr = addressList[i];
+      const size = parseFilterSize(sizeList[i]);
+
+      if (!size) {
+        return res.status(400).json({
+          error: `Invalid filter size at position ${i}`,
+          invalidSize: sizeList[i]
+        });
+      }
+
+      if (!addressGroups[addr]) {
+        addressGroups[addr] = [];
+      }
+      addressGroups[addr].push(size);
     }
 
     const results = [];
     const serviceTotals = {};
 
-    for (const group of addressGroups) {
-      // Split by | to get address and filter sizes
-      const parts = group.split('|');
-      if (parts.length < 2) {
-        return res.status(400).json({
-          error: 'Each address group must have format: Address|size1,size2',
-          invalidGroup: group
-        });
-      }
-
-      const addressStr = parts[0].trim();
-      const sizesStr = parts.slice(1).join('|').trim(); // In case address has | in it
-
+    for (const [addressStr, filterSizes] of Object.entries(addressGroups)) {
       // Parse address to get state and zip
       const address = parseAddress(addressStr);
       if (!address) {
@@ -393,20 +409,8 @@ router.post('/quote', async (req, res, next) => {
         });
       }
 
-      // Parse filter sizes
-      const sizes = sizesStr.split(',')
-        .map(s => parseFilterSize(s.trim()))
-        .filter(s => s !== null);
-
-      if (sizes.length === 0) {
-        return res.status(400).json({
-          error: 'No valid filter sizes found',
-          invalidSizes: sizesStr
-        });
-      }
-
       // Pack filters into boxes
-      const boxes = packFiltersIntoBoxes(sizes);
+      const boxes = packFiltersIntoBoxes(filterSizes);
 
       // Get rates for each box
       const boxRates = [];
@@ -464,7 +468,7 @@ router.post('/quote', async (req, res, next) => {
 
       results.push({
         address,
-        filterCount: sizes.length,
+        filterCount: filterSizes.length,
         boxes: boxes.map(b => ({ dimensions: b.dimensions, filterCount: b.filterCount, weight: b.weight })),
         rates: addressRates
       });
