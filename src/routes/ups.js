@@ -219,24 +219,104 @@ function packFiltersIntoBoxes(filters) {
 }
 
 /**
+ * Parse address string to extract state and zip
+ * Format: "Street, City, ST, ZIPCODE" or "Street, City, ST, ZIPCODE-XXXX"
+ * Returns: { state, postalCode }
+ */
+function parseAddress(addressStr) {
+  // Match state (2 letters) followed by zip (5 digits, optionally with -4 more)
+  const match = addressStr.match(/,\s*([A-Z]{2}),\s*(\d{5}(?:-\d{4})?)\s*$/);
+  if (match) {
+    return {
+      state: match[1],
+      postalCode: match[2].substring(0, 5) // Use 5-digit zip
+    };
+  }
+  return null;
+}
+
+/**
+ * Split concatenated addresses string into individual addresses
+ * Addresses are separated by the pattern: zip code followed by comma and space
+ */
+function splitAddresses(addressesStr) {
+  // Split on zip code pattern followed by comma (end of one address, start of next)
+  const parts = addressesStr.split(/(\d{5}(?:-\d{4})?),\s*(?=[A-Z0-9])/);
+
+  const addresses = [];
+  for (let i = 0; i < parts.length; i += 2) {
+    if (parts[i] && parts[i + 1]) {
+      addresses.push(parts[i] + parts[i + 1]);
+    } else if (parts[i]) {
+      addresses.push(parts[i]);
+    }
+  }
+  return addresses;
+}
+
+/**
+ * Parse filters string and group by address using (N) numbering
+ * When number restarts at (1) or HVAC ID changes, it's a new address group
+ */
+function parseFilters(filtersStr) {
+  const filterParts = filtersStr.split(/,\s*(?=\(\d+\))/);
+  const groups = [];
+  let currentGroup = [];
+  let lastNumber = 0;
+  let lastHvacId = null;
+
+  for (const part of filterParts) {
+    // Extract number and HVAC ID
+    const numMatch = part.match(/^\((\d+)\)/);
+    const hvacMatch = part.match(/HVAC ID:\s*([A-Z0-9-]+)/i);
+
+    const num = numMatch ? parseInt(numMatch[1]) : 0;
+    const hvacId = hvacMatch ? hvacMatch[1] : null;
+
+    // Check if this is a new address group
+    if (currentGroup.length > 0 && (num === 1 && lastNumber >= 1) || (hvacId && lastHvacId && hvacId !== lastHvacId)) {
+      groups.push(currentGroup);
+      currentGroup = [];
+    }
+
+    currentGroup.push({ raw: part, number: num, hvacId });
+    lastNumber = num;
+    lastHvacId = hvacId;
+  }
+
+  if (currentGroup.length > 0) {
+    groups.push(currentGroup);
+  }
+
+  return groups;
+}
+
+/**
+ * Parse filter size string (e.g., "16x20x1")
+ * Returns: { length, width, depth }
+ */
+function parseFilterSize(sizeStr) {
+  const parts = sizeStr.trim().split('x').map(s => parseFloat(s));
+  if (parts.length === 3) {
+    return { length: parts[0], width: parts[1], depth: parts[2] };
+  }
+  return null;
+}
+
+/**
  * POST /api/ups/quote
  * Get shipping quotes for multiple addresses with filter packing optimization
  *
- * Bubble-friendly format with parallel lists:
+ * Bubble-friendly format:
  * {
- *   "postalCodes": ["90210", "10001"],
- *   "stateCodes": ["CA", "NY"],
- *   "filterLengths": ["16,16", "20"],
- *   "filterWidths": ["20,18", "25"],
- *   "filterDepths": ["1,3", "2"]
+ *   "addresses": "32-34 41st Street, Long Island City, NY, 11103-3582, 934 South Clinton Street, Baltimore, MD, 21224-5023",
+ *   "filters": "(1)xxx - HVAC ID: LCC-XXX, (1)xxx - HVAC ID: LCC-YYY",
+ *   "filterSizes": "16x20x1, 16x20x1"
  * }
- *
- * Each index corresponds to one address.
- * Filter dimensions are comma-separated within each string.
  */
 router.post('/quote', async (req, res, next) => {
   try {
-    const { postalCodes, stateCodes, filterLengths, filterWidths, filterDepths } = req.body;
+    const { addresses, filters, filterSizes } = req.body;
 
     // Get ship-from from environment
     const shipFromPostalCode = process.env.SHIP_FROM_POSTAL_CODE;
@@ -248,59 +328,59 @@ router.post('/quote', async (req, res, next) => {
       });
     }
 
-    // Validate required arrays
-    if (!postalCodes || !Array.isArray(postalCodes) || postalCodes.length === 0) {
-      return res.status(400).json({ error: 'postalCodes array is required' });
+    if (!addresses || typeof addresses !== 'string') {
+      return res.status(400).json({ error: 'addresses string is required' });
     }
-    if (!stateCodes || !Array.isArray(stateCodes)) {
-      return res.status(400).json({ error: 'stateCodes array is required' });
+    if (!filters || typeof filters !== 'string') {
+      return res.status(400).json({ error: 'filters string is required' });
     }
-    if (!filterLengths || !Array.isArray(filterLengths)) {
-      return res.status(400).json({ error: 'filterLengths array is required' });
-    }
-    if (!filterWidths || !Array.isArray(filterWidths)) {
-      return res.status(400).json({ error: 'filterWidths array is required' });
-    }
-    if (!filterDepths || !Array.isArray(filterDepths)) {
-      return res.status(400).json({ error: 'filterDepths array is required' });
+    if (!filterSizes || typeof filterSizes !== 'string') {
+      return res.status(400).json({ error: 'filterSizes string is required' });
     }
 
-    // Check all arrays have same length
-    const len = postalCodes.length;
-    if (stateCodes.length !== len || filterLengths.length !== len ||
-        filterWidths.length !== len || filterDepths.length !== len) {
+    // Parse addresses
+    const addressList = splitAddresses(addresses);
+    const parsedAddresses = addressList.map(a => parseAddress(a)).filter(a => a !== null);
+
+    if (parsedAddresses.length === 0) {
+      return res.status(400).json({ error: 'Could not parse any addresses', raw: addresses });
+    }
+
+    // Parse filter sizes
+    const sizeList = filterSizes.split(',').map(s => parseFilterSize(s)).filter(s => s !== null);
+
+    // Parse and group filters by address
+    const filterGroups = parseFilters(filters);
+
+    // Validate counts
+    if (filterGroups.length !== parsedAddresses.length) {
       return res.status(400).json({
-        error: `All arrays must have same length. Got postalCodes:${postalCodes.length}, stateCodes:${stateCodes.length}, filterLengths:${filterLengths.length}, filterWidths:${filterWidths.length}, filterDepths:${filterDepths.length}`
+        error: `Address count (${parsedAddresses.length}) doesn't match filter groups (${filterGroups.length})`,
+        parsedAddresses,
+        filterGroups: filterGroups.map(g => g.length)
       });
     }
+
+    // Match filter sizes to filters (in order)
+    let sizeIndex = 0;
+    const addressShipments = parsedAddresses.map((addr, i) => {
+      const group = filterGroups[i];
+      const filtersWithSizes = group.map(() => {
+        const size = sizeList[sizeIndex] || { length: 16, width: 20, depth: 1 }; // Default if missing
+        sizeIndex++;
+        return size;
+      });
+      return { address: addr, filters: filtersWithSizes };
+    });
 
     const results = [];
     const serviceTotals = {};
 
-    for (let i = 0; i < len; i++) {
-      const postalCode = postalCodes[i];
-      const stateCode = stateCodes[i];
-
-      // Parse comma-separated filter dimensions
-      const lengths = filterLengths[i].split(',').map(s => parseFloat(s.trim()));
-      const widths = filterWidths[i].split(',').map(s => parseFloat(s.trim()));
-      const depths = filterDepths[i].split(',').map(s => parseFloat(s.trim()));
-
-      if (lengths.length !== widths.length || lengths.length !== depths.length) {
-        return res.status(400).json({
-          error: `Filter dimensions mismatch at index ${i}. lengths:${lengths.length}, widths:${widths.length}, depths:${depths.length}`
-        });
-      }
-
-      // Build filters array
-      const filters = lengths.map((length, j) => ({
-        length,
-        width: widths[j],
-        depth: depths[j]
-      }));
+    for (const shipment of addressShipments) {
+      const { address, filters: shipmentFilters } = shipment;
 
       // Pack filters into boxes
-      const boxes = packFiltersIntoBoxes(filters);
+      const boxes = packFiltersIntoBoxes(shipmentFilters);
 
       // Get rates for each box
       const boxRates = [];
@@ -308,8 +388,8 @@ router.post('/quote', async (req, res, next) => {
         const result = await upsService.shopRates({
           shipFromPostalCode,
           shipFromStateCode,
-          shipToPostalCode: postalCode,
-          shipToStateCode: stateCode,
+          shipToPostalCode: address.postalCode,
+          shipToStateCode: address.state,
           weight: box.weight,
           length: box.length,
           width: box.width,
@@ -357,7 +437,8 @@ router.post('/quote', async (req, res, next) => {
       }
 
       results.push({
-        address: { postalCode, stateCode },
+        address,
+        filterCount: shipmentFilters.length,
         boxes: boxes.map(b => ({ dimensions: b.dimensions, filterCount: b.filterCount, weight: b.weight })),
         rates: addressRates
       });
