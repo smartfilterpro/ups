@@ -333,19 +333,27 @@ function parseFilterSize(sizeStr) {
  * POST /api/ups/quote
  * Get shipping quotes for multiple addresses with filter packing optimization
  *
- * Simple Bubble-friendly format with two parallel strings:
+ * Accepts two formats:
+ *
+ * Format 1 - Delimited strings:
  * {
  *   "addresses": "addr1 ;; addr1 ;; addr2",
  *   "sizes": "16x20x1, 16x20x2, 20x25x1"
  * }
  *
- * - addresses: each filter's address, separated by " ;; " (address repeats for each filter at that address)
- * - sizes: each filter's size, separated by ", "
+ * Format 2 - Arrays (Bubble-friendly for multiple filters):
+ * {
+ *   "addresses": ["addr1", "addr1", "addr2"],
+ *   "sizes": ["16x20x1", "16x20x2", "20x25x1"]
+ * }
+ *
+ * - addresses: each filter's address (address repeats for each filter at that address)
+ * - sizes: each filter's size as LxWxD
  * - The API groups filters by address automatically
  */
 router.post('/quote', async (req, res, next) => {
   try {
-    const { addresses, sizes } = req.body;
+    let { addresses, sizes } = req.body;
 
     // Get ship-from from environment
     const shipFromPostalCode = process.env.SHIP_FROM_POSTAL_CODE;
@@ -357,18 +365,26 @@ router.post('/quote', async (req, res, next) => {
       });
     }
 
-    if (!addresses || typeof addresses !== 'string' || addresses.trim() === '') {
-      return res.status(400).json({ error: 'addresses string is required and cannot be empty' });
-    }
-    if (!sizes || typeof sizes !== 'string' || sizes.trim() === '') {
-      return res.status(400).json({ error: 'sizes string is required and cannot be empty' });
+    // Handle both array and string inputs for addresses
+    // Bubble may send arrays when there are multiple filters
+    let addressList;
+    if (Array.isArray(addresses)) {
+      addressList = addresses.map(a => String(a).trim()).filter(a => a.length > 0);
+    } else if (typeof addresses === 'string' && addresses.trim() !== '') {
+      addressList = addresses.split(';;').map(a => a.trim()).filter(a => a.length > 0);
+    } else {
+      return res.status(400).json({ error: 'addresses is required and cannot be empty (accepts string with ;; separator or array)' });
     }
 
-    // Split addresses by " ;; " (unique separator that won't appear in addresses)
-    const addressList = addresses.split(';;').map(a => a.trim()).filter(a => a.length > 0);
-
-    // Split sizes by ", "
-    const sizeList = sizes.split(',').map(s => s.trim()).filter(s => s.length > 0);
+    // Handle both array and string inputs for sizes
+    let sizeList;
+    if (Array.isArray(sizes)) {
+      sizeList = sizes.map(s => String(s).trim()).filter(s => s.length > 0);
+    } else if (typeof sizes === 'string' && sizes.trim() !== '') {
+      sizeList = sizes.split(',').map(s => s.trim()).filter(s => s.length > 0);
+    } else {
+      return res.status(400).json({ error: 'sizes is required and cannot be empty (accepts string with , separator or array)' });
+    }
 
     if (addressList.length === 0) {
       return res.status(400).json({ error: 'No valid addresses provided' });
