@@ -333,27 +333,30 @@ function parseFilterSize(sizeStr) {
  * POST /api/ups/quote
  * Get shipping quotes for multiple addresses with filter packing optimization
  *
- * Accepts two formats:
+ * Accepts three formats:
  *
- * Format 1 - Delimited strings:
+ * Format 1 - Combined filter string (recommended for Bubble):
+ * {
+ *   "filters": "(1)ID - HVAC ID: xxx - Address: 123 Main St, City, ST, 12345 - size: 16x24x1;;(2)ID - HVAC ID: xxx - Address: 123 Main St, City, ST, 12345 - size: 16x20x1"
+ * }
+ *
+ * Format 2 - Delimited strings:
  * {
  *   "addresses": "addr1 ;; addr1 ;; addr2",
  *   "sizes": "16x20x1, 16x20x2, 20x25x1"
  * }
  *
- * Format 2 - Arrays (Bubble-friendly for multiple filters):
+ * Format 3 - Arrays:
  * {
  *   "addresses": ["addr1", "addr1", "addr2"],
  *   "sizes": ["16x20x1", "16x20x2", "20x25x1"]
  * }
  *
- * - addresses: each filter's address (address repeats for each filter at that address)
- * - sizes: each filter's size as LxWxD
  * - The API groups filters by address automatically
  */
 router.post('/quote', async (req, res, next) => {
   try {
-    let { addresses, sizes } = req.body;
+    let { addresses, sizes, filters } = req.body;
 
     // Get ship-from from environment
     const shipFromPostalCode = process.env.SHIP_FROM_POSTAL_CODE;
@@ -365,25 +368,61 @@ router.post('/quote', async (req, res, next) => {
       });
     }
 
-    // Handle both array and string inputs for addresses
-    // Bubble may send arrays when there are multiple filters
-    let addressList;
-    if (Array.isArray(addresses)) {
-      addressList = addresses.map(a => String(a).trim()).filter(a => a.length > 0);
-    } else if (typeof addresses === 'string' && addresses.trim() !== '') {
-      addressList = addresses.split(';;').map(a => a.trim()).filter(a => a.length > 0);
-    } else {
-      return res.status(400).json({ error: 'addresses is required and cannot be empty (accepts string with ;; separator or array)' });
-    }
+    let addressList = [];
+    let sizeList = [];
 
-    // Handle both array and string inputs for sizes
-    let sizeList;
-    if (Array.isArray(sizes)) {
-      sizeList = sizes.map(s => String(s).trim()).filter(s => s.length > 0);
-    } else if (typeof sizes === 'string' && sizes.trim() !== '') {
-      sizeList = sizes.split(',').map(s => s.trim()).filter(s => s.length > 0);
-    } else {
-      return res.status(400).json({ error: 'sizes is required and cannot be empty (accepts string with , separator or array)' });
+    // Format 1: Combined filter string with embedded address and size
+    // Example: "(1)ID - HVAC ID: xxx - Address: 123 Main, City, ST, 12345 - size: 16x24x1;;(2)..."
+    if (filters && typeof filters === 'string' && filters.trim() !== '') {
+      const filterEntries = filters.split(';;').map(f => f.trim()).filter(f => f.length > 0);
+
+      for (const entry of filterEntries) {
+        // Extract address: look for "Address: " followed by content until " - size:"
+        const addressMatch = entry.match(/Address:\s*(.+?)\s*-\s*size:/i);
+        // Extract size: look for "size: " followed by dimensions like "16x24x1"
+        const sizeMatch = entry.match(/size:\s*(\d+x\d+x\d+)/i);
+
+        if (!addressMatch) {
+          return res.status(400).json({
+            error: 'Could not parse address from filter entry',
+            invalidEntry: entry,
+            hint: 'Expected format: ... Address: Street, City, ST, ZIP - size: LxWxD'
+          });
+        }
+        if (!sizeMatch) {
+          return res.status(400).json({
+            error: 'Could not parse size from filter entry',
+            invalidEntry: entry,
+            hint: 'Expected format: ... - size: LxWxD (e.g., 16x20x1)'
+          });
+        }
+
+        addressList.push(addressMatch[1].trim());
+        sizeList.push(sizeMatch[1].trim());
+      }
+    }
+    // Format 2 & 3: Separate addresses and sizes (array or string)
+    else {
+      // Handle both array and string inputs for addresses
+      if (Array.isArray(addresses)) {
+        addressList = addresses.map(a => String(a).trim()).filter(a => a.length > 0);
+      } else if (typeof addresses === 'string' && addresses.trim() !== '') {
+        addressList = addresses.split(';;').map(a => a.trim()).filter(a => a.length > 0);
+      } else {
+        return res.status(400).json({
+          error: 'Either "filters" string or "addresses" + "sizes" are required',
+          hint: 'Use filters param with combined string, or addresses/sizes params separately'
+        });
+      }
+
+      // Handle both array and string inputs for sizes
+      if (Array.isArray(sizes)) {
+        sizeList = sizes.map(s => String(s).trim()).filter(s => s.length > 0);
+      } else if (typeof sizes === 'string' && sizes.trim() !== '') {
+        sizeList = sizes.split(',').map(s => s.trim()).filter(s => s.length > 0);
+      } else {
+        return res.status(400).json({ error: 'sizes is required when using addresses param (accepts string with , separator or array)' });
+      }
     }
 
     if (addressList.length === 0) {
@@ -396,7 +435,7 @@ router.post('/quote', async (req, res, next) => {
     if (addressList.length !== sizeList.length) {
       return res.status(400).json({
         error: `Address count (${addressList.length}) doesn't match size count (${sizeList.length})`,
-        debug: { addressCount: addressList.length, sizeCount: sizeList.length }
+        debug: { addressCount: addressList.length, sizeCount: sizeList.length, addresses: addressList, sizes: sizeList }
       });
     }
 
