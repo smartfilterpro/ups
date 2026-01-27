@@ -225,7 +225,8 @@ function packFiltersIntoBoxes(filters) {
  */
 function parseAddress(addressStr) {
   // Match state (2 letters) followed by zip (5 digits, optionally with -4 more)
-  const match = addressStr.match(/,\s*([A-Z]{2}),\s*(\d{5}(?:-\d{4})?)\s*$/);
+  // More flexible - doesn't require end of string
+  const match = addressStr.match(/,\s*([A-Z]{2}),\s*(\d{5}(?:-\d{4})?)/);
   if (match) {
     return {
       state: match[1],
@@ -240,17 +241,39 @@ function parseAddress(addressStr) {
  * Addresses are separated by the pattern: zip code followed by comma and space
  */
 function splitAddresses(addressesStr) {
-  // Split on zip code pattern followed by comma (end of one address, start of next)
-  const parts = addressesStr.split(/(\d{5}(?:-\d{4})?),\s*(?=[A-Z0-9])/);
+  // Find all zip codes with their positions
+  const zipPattern = /(\d{5}(?:-\d{4})?)/g;
+  const matches = [...addressesStr.matchAll(zipPattern)];
 
+  if (matches.length === 0) return [];
+  if (matches.length === 1) return [addressesStr];
+
+  // Split after each zip code (except the last one)
   const addresses = [];
-  for (let i = 0; i < parts.length; i += 2) {
-    if (parts[i] && parts[i + 1]) {
-      addresses.push(parts[i] + parts[i + 1]);
-    } else if (parts[i]) {
-      addresses.push(parts[i]);
+  let lastEnd = 0;
+
+  for (let i = 0; i < matches.length; i++) {
+    const match = matches[i];
+    const zipEnd = match.index + match[0].length;
+
+    // Check if there's a comma after this zip (indicating another address follows)
+    const afterZip = addressesStr.substring(zipEnd, zipEnd + 2);
+    if (afterZip.startsWith(',') && i < matches.length - 1) {
+      // This zip ends an address
+      addresses.push(addressesStr.substring(lastEnd, zipEnd).trim());
+      // Skip the comma and space
+      lastEnd = zipEnd + 1;
+      while (lastEnd < addressesStr.length && addressesStr[lastEnd] === ' ') {
+        lastEnd++;
+      }
     }
   }
+
+  // Add the last address
+  if (lastEnd < addressesStr.length) {
+    addresses.push(addressesStr.substring(lastEnd).trim());
+  }
+
   return addresses;
 }
 
@@ -267,14 +290,17 @@ function parseFilters(filtersStr) {
 
   for (const part of filterParts) {
     // Extract number and HVAC ID
-    const numMatch = part.match(/^\((\d+)\)/);
+    const numMatch = part.match(/^\s*\((\d+)\)/);
     const hvacMatch = part.match(/HVAC ID:\s*([A-Z0-9-]+)/i);
 
     const num = numMatch ? parseInt(numMatch[1]) : 0;
     const hvacId = hvacMatch ? hvacMatch[1] : null;
 
-    // Check if this is a new address group
-    if (currentGroup.length > 0 && (num === 1 && lastNumber >= 1) || (hvacId && lastHvacId && hvacId !== lastHvacId)) {
+    // Check if this is a new address group (fix operator precedence)
+    const isNewGroup = currentGroup.length > 0 &&
+      ((num === 1 && lastNumber >= 1) || (hvacId && lastHvacId && hvacId !== lastHvacId));
+
+    if (isNewGroup) {
       groups.push(currentGroup);
       currentGroup = [];
     }
@@ -307,16 +333,19 @@ function parseFilterSize(sizeStr) {
  * POST /api/ups/quote
  * Get shipping quotes for multiple addresses with filter packing optimization
  *
- * Bubble-friendly format:
+ * Simple Bubble-friendly format with two parallel strings:
  * {
- *   "addresses": "32-34 41st Street, Long Island City, NY, 11103-3582, 934 South Clinton Street, Baltimore, MD, 21224-5023",
- *   "filters": "(1)xxx - HVAC ID: LCC-XXX, (1)xxx - HVAC ID: LCC-YYY",
- *   "filterSizes": "16x20x1, 16x20x1"
+ *   "addresses": "addr1 ;; addr1 ;; addr2",
+ *   "sizes": "16x20x1, 16x20x2, 20x25x1"
  * }
+ *
+ * - addresses: each filter's address, separated by " ;; " (address repeats for each filter at that address)
+ * - sizes: each filter's size, separated by ", "
+ * - The API groups filters by address automatically
  */
 router.post('/quote', async (req, res, next) => {
   try {
-    const { addresses, filters, filterSizes } = req.body;
+    const { addresses, sizes } = req.body;
 
     // Get ship-from from environment
     const shipFromPostalCode = process.env.SHIP_FROM_POSTAL_CODE;
@@ -331,56 +360,57 @@ router.post('/quote', async (req, res, next) => {
     if (!addresses || typeof addresses !== 'string') {
       return res.status(400).json({ error: 'addresses string is required' });
     }
-    if (!filters || typeof filters !== 'string') {
-      return res.status(400).json({ error: 'filters string is required' });
-    }
-    if (!filterSizes || typeof filterSizes !== 'string') {
-      return res.status(400).json({ error: 'filterSizes string is required' });
+    if (!sizes || typeof sizes !== 'string') {
+      return res.status(400).json({ error: 'sizes string is required' });
     }
 
-    // Parse addresses
-    const addressList = splitAddresses(addresses);
-    const parsedAddresses = addressList.map(a => parseAddress(a)).filter(a => a !== null);
+    // Split addresses by " ;; " (unique separator that won't appear in addresses)
+    const addressList = addresses.split(';;').map(a => a.trim());
 
-    if (parsedAddresses.length === 0) {
-      return res.status(400).json({ error: 'Could not parse any addresses', raw: addresses });
-    }
+    // Split sizes by ", "
+    const sizeList = sizes.split(',').map(s => s.trim());
 
-    // Parse filter sizes
-    const sizeList = filterSizes.split(',').map(s => parseFilterSize(s)).filter(s => s !== null);
-
-    // Parse and group filters by address
-    const filterGroups = parseFilters(filters);
-
-    // Validate counts
-    if (filterGroups.length !== parsedAddresses.length) {
+    if (addressList.length !== sizeList.length) {
       return res.status(400).json({
-        error: `Address count (${parsedAddresses.length}) doesn't match filter groups (${filterGroups.length})`,
-        parsedAddresses,
-        filterGroups: filterGroups.map(g => g.length)
+        error: `Address count (${addressList.length}) doesn't match size count (${sizeList.length})`,
+        debug: { addressCount: addressList.length, sizeCount: sizeList.length }
       });
     }
 
-    // Match filter sizes to filters (in order)
-    let sizeIndex = 0;
-    const addressShipments = parsedAddresses.map((addr, i) => {
-      const group = filterGroups[i];
-      const filtersWithSizes = group.map(() => {
-        const size = sizeList[sizeIndex] || { length: 16, width: 20, depth: 1 }; // Default if missing
-        sizeIndex++;
-        return size;
-      });
-      return { address: addr, filters: filtersWithSizes };
-    });
+    // Group filters by address
+    const addressGroups = {};
+    for (let i = 0; i < addressList.length; i++) {
+      const addr = addressList[i];
+      const size = parseFilterSize(sizeList[i]);
+
+      if (!size) {
+        return res.status(400).json({
+          error: `Invalid filter size at position ${i}`,
+          invalidSize: sizeList[i]
+        });
+      }
+
+      if (!addressGroups[addr]) {
+        addressGroups[addr] = [];
+      }
+      addressGroups[addr].push(size);
+    }
 
     const results = [];
     const serviceTotals = {};
 
-    for (const shipment of addressShipments) {
-      const { address, filters: shipmentFilters } = shipment;
+    for (const [addressStr, filterSizes] of Object.entries(addressGroups)) {
+      // Parse address to get state and zip
+      const address = parseAddress(addressStr);
+      if (!address) {
+        return res.status(400).json({
+          error: 'Could not parse address. Expected format: Street, City, ST, ZIPCODE',
+          invalidAddress: addressStr
+        });
+      }
 
       // Pack filters into boxes
-      const boxes = packFiltersIntoBoxes(shipmentFilters);
+      const boxes = packFiltersIntoBoxes(filterSizes);
 
       // Get rates for each box
       const boxRates = [];
@@ -438,7 +468,7 @@ router.post('/quote', async (req, res, next) => {
 
       results.push({
         address,
-        filterCount: shipmentFilters.length,
+        filterCount: filterSizes.length,
         boxes: boxes.map(b => ({ dimensions: b.dimensions, filterCount: b.filterCount, weight: b.weight })),
         rates: addressRates
       });
