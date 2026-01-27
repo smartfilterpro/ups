@@ -357,18 +357,25 @@ router.post('/quote', async (req, res, next) => {
       });
     }
 
-    if (!addresses || typeof addresses !== 'string') {
-      return res.status(400).json({ error: 'addresses string is required' });
+    if (!addresses || typeof addresses !== 'string' || addresses.trim() === '') {
+      return res.status(400).json({ error: 'addresses string is required and cannot be empty' });
     }
-    if (!sizes || typeof sizes !== 'string') {
-      return res.status(400).json({ error: 'sizes string is required' });
+    if (!sizes || typeof sizes !== 'string' || sizes.trim() === '') {
+      return res.status(400).json({ error: 'sizes string is required and cannot be empty' });
     }
 
     // Split addresses by " ;; " (unique separator that won't appear in addresses)
-    const addressList = addresses.split(';;').map(a => a.trim());
+    const addressList = addresses.split(';;').map(a => a.trim()).filter(a => a.length > 0);
 
     // Split sizes by ", "
-    const sizeList = sizes.split(',').map(s => s.trim());
+    const sizeList = sizes.split(',').map(s => s.trim()).filter(s => s.length > 0);
+
+    if (addressList.length === 0) {
+      return res.status(400).json({ error: 'No valid addresses provided' });
+    }
+    if (sizeList.length === 0) {
+      return res.status(400).json({ error: 'No valid filter sizes provided' });
+    }
 
     if (addressList.length !== sizeList.length) {
       return res.status(400).json({
