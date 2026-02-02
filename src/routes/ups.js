@@ -525,4 +525,159 @@ router.get('/debug', (req, res) => {
   });
 });
 
+/**
+ * POST /api/ups/ship
+ * Create a shipment and get shipping label
+ *
+ * Request body:
+ * {
+ *   // Ship To (required)
+ *   shipToName: "John Doe",
+ *   shipToCompany: "Acme Inc",  // optional
+ *   shipToPhone: "5551234567",
+ *   shipToAddress: "123 Main St",
+ *   shipToCity: "Los Angeles",
+ *   shipToStateCode: "CA",
+ *   shipToPostalCode: "90001",
+ *
+ *   // Ship From (optional - defaults to environment vars)
+ *   shipFromName: "SmartFilterPro",
+ *   shipFromCompany: "SmartFilterPro",
+ *   shipFromPhone: "5559876543",
+ *   shipFromAddress: "456 Warehouse Blvd",
+ *   shipFromCity: "Baltimore",
+ *   shipFromStateCode: "MD",
+ *   shipFromPostalCode: "21224",
+ *
+ *   // Package (required)
+ *   weight: 5,
+ *   length: 16,
+ *   width: 20,
+ *   height: 4,
+ *
+ *   // Service (optional, defaults to Ground)
+ *   serviceCode: "03",
+ *
+ *   // Label format (optional, defaults to GIF)
+ *   labelFormat: "GIF"  // GIF, PNG, PDF, ZPL
+ * }
+ */
+router.post('/ship', async (req, res, next) => {
+  try {
+    const {
+      // Ship To (required)
+      shipToName,
+      shipToCompany,
+      shipToPhone,
+      shipToAddress,
+      shipToCity,
+      shipToStateCode,
+      shipToPostalCode,
+      shipToCountryCode = 'US',
+
+      // Ship From (optional - use env vars as defaults)
+      shipFromName = process.env.SHIP_FROM_NAME || 'SmartFilterPro',
+      shipFromCompany = process.env.SHIP_FROM_COMPANY || 'SmartFilterPro',
+      shipFromPhone = process.env.SHIP_FROM_PHONE || '0000000000',
+      shipFromAddress = process.env.SHIP_FROM_ADDRESS,
+      shipFromCity = process.env.SHIP_FROM_CITY,
+      shipFromStateCode = process.env.SHIP_FROM_STATE_CODE,
+      shipFromPostalCode = process.env.SHIP_FROM_POSTAL_CODE,
+      shipFromCountryCode = 'US',
+
+      // Package
+      weight,
+      length,
+      width,
+      height,
+      weightUnit = 'LBS',
+      dimensionUnit = 'IN',
+
+      // Service
+      serviceCode = '03', // Default to Ground
+
+      // Label
+      labelFormat = 'GIF'
+    } = req.body;
+
+    // Validate ship-to
+    if (!shipToName || !shipToPhone || !shipToAddress || !shipToCity || !shipToStateCode || !shipToPostalCode) {
+      return res.status(400).json({
+        error: 'Ship-to details required: shipToName, shipToPhone, shipToAddress, shipToCity, shipToStateCode, shipToPostalCode'
+      });
+    }
+
+    // Validate ship-from
+    if (!shipFromAddress || !shipFromCity || !shipFromStateCode || !shipFromPostalCode) {
+      return res.status(400).json({
+        error: 'Ship-from address not configured. Set SHIP_FROM_ADDRESS, SHIP_FROM_CITY, SHIP_FROM_STATE_CODE, SHIP_FROM_POSTAL_CODE environment variables or provide in request.'
+      });
+    }
+
+    // Validate package
+    if (!weight || !length || !width || !height) {
+      return res.status(400).json({ error: 'Package weight and dimensions required (weight, length, width, height)' });
+    }
+
+    const result = await upsService.createShipment({
+      shipFromName,
+      shipFromCompany,
+      shipFromPhone,
+      shipFromAddress,
+      shipFromCity,
+      shipFromStateCode,
+      shipFromPostalCode,
+      shipFromCountryCode,
+      shipToName,
+      shipToCompany,
+      shipToPhone,
+      shipToAddress,
+      shipToCity,
+      shipToStateCode,
+      shipToPostalCode,
+      shipToCountryCode,
+      weight,
+      weightUnit,
+      length,
+      width,
+      height,
+      dimensionUnit,
+      serviceCode,
+      labelFormat
+    });
+
+    // Parse response
+    const shipmentResponse = result.ShipmentResponse?.ShipmentResults;
+    if (!shipmentResponse) {
+      return res.status(400).json({ error: 'Shipment creation failed', raw: result });
+    }
+
+    const packageResult = shipmentResponse.PackageResults;
+    const labelImage = packageResult?.ShippingLabel?.GraphicImage;
+
+    res.json({
+      success: true,
+      trackingNumber: packageResult?.TrackingNumber,
+      shipmentIdentificationNumber: shipmentResponse.ShipmentIdentificationNumber,
+      service: SERVICE_CODES[serviceCode] || serviceCode,
+      totalCharges: {
+        amount: shipmentResponse.ShipmentCharges?.TotalCharges?.MonetaryValue,
+        currency: shipmentResponse.ShipmentCharges?.TotalCharges?.CurrencyCode
+      },
+      billingWeight: {
+        weight: shipmentResponse.BillingWeight?.Weight,
+        unit: shipmentResponse.BillingWeight?.UnitOfMeasurement?.Code
+      },
+      label: {
+        format: labelFormat,
+        image: labelImage // Base64 encoded
+      },
+      raw: result
+    });
+
+  } catch (error) {
+    next(error);
+  }
+});
+
 module.exports = router;
