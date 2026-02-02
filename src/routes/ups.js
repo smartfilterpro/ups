@@ -549,47 +549,24 @@ router.get('/debug', (req, res) => {
  * POST /api/ups/ship
  * Create a shipment and get shipping label
  *
- * Supports two input formats:
- *
- * FORMAT 1 - Quote-style (recommended):
- * {
- *   "addresses": "934 South Clinton Street, Baltimore, MD, 21224;;...",
- *   "sizes": "16x24x1,16x20x1,16x20x1",
- *   "shipToName": "John Doe",
- *   "shipToPhone": "5551234567",
- *   "serviceCode": "03"  // optional, defaults to Ground
- * }
- *
- * FORMAT 2 - Explicit (single box):
+ * RECOMMENDED FORMAT - Filters string (from Bubble):
  * {
  *   "shipToName": "John Doe",
  *   "shipToPhone": "5551234567",
- *   "shipToAddress": "123 Main St",
- *   "shipToCity": "Los Angeles",
- *   "shipToStateCode": "CA",
- *   "shipToPostalCode": "90001",
- *   "weight": 5,
- *   "length": 16,
- *   "width": 20,
- *   "height": 4,
- *   "serviceCode": "03"
+ *   "filters": "(1)123x456 - HVAC ID: ... - Address: 934 South Clinton Street, Baltimore, MD, 21224-5023 - size: 16x24x1;;(2)..."
  * }
+ *
+ * The filters string is parsed to extract addresses and sizes automatically.
  */
 router.post('/ship', async (req, res, next) => {
   try {
     const {
-      // Quote-style input
-      addresses,
-      sizes,
+      // Filters string (recommended - from Bubble)
+      filters,
 
       // Ship To (required)
       shipToName,
-      shipToCompany,
       shipToPhone,
-      shipToAddress,
-      shipToCity,
-      shipToStateCode,
-      shipToPostalCode,
       shipToCountryCode = 'US',
 
       // Ship From (optional - use env vars as defaults)
@@ -601,14 +578,6 @@ router.post('/ship', async (req, res, next) => {
       shipFromStateCode = process.env.SHIP_FROM_STATE_CODE,
       shipFromPostalCode = process.env.SHIP_FROM_POSTAL_CODE,
       shipFromCountryCode = 'US',
-
-      // Package (for explicit format)
-      weight,
-      length,
-      width,
-      height,
-      weightUnit = 'LBS',
-      dimensionUnit = 'IN',
 
       // Service
       serviceCode = '03', // Default to Ground
@@ -624,81 +593,77 @@ router.post('/ship', async (req, res, next) => {
       });
     }
 
-    // Validate recipient info (required for both formats)
+    // Validate recipient info
     if (!shipToName || !shipToPhone) {
       return res.status(400).json({
         error: 'Recipient details required: shipToName, shipToPhone'
       });
     }
 
-    // Determine which format is being used
-    const useQuoteFormat = addresses && sizes;
-
-    let boxesToShip = [];
-    let parsedAddress = null;
-
-    if (useQuoteFormat) {
-      // QUOTE-STYLE FORMAT: Parse addresses and sizes, pack boxes
-      const addressList = addresses.split(';;').map(a => a.trim()).filter(a => a.length > 0);
-      const sizeList = sizes.split(',').map(s => s.trim()).filter(s => s.length > 0);
-
-      if (addressList.length === 0 || sizeList.length === 0) {
-        return res.status(400).json({ error: 'addresses and sizes cannot be empty' });
-      }
-
-      // Get unique address (assuming single address as per user request)
-      const uniqueAddresses = [...new Set(addressList)];
-      if (uniqueAddresses.length > 1) {
-        return res.status(400).json({
-          error: 'Multiple addresses detected. /ship only supports single address. Use separate calls for each address.',
-          addressCount: uniqueAddresses.length
-        });
-      }
-
-      // Parse the address
-      parsedAddress = parseAddress(uniqueAddresses[0]);
-      if (!parsedAddress) {
-        return res.status(400).json({
-          error: 'Could not parse address. Expected format: Street, City, ST, ZIPCODE',
-          invalidAddress: uniqueAddresses[0]
-        });
-      }
-
-      // Parse filter sizes
-      const filterSizes = sizeList.map(s => parseFilterSize(s)).filter(s => s !== null);
-      if (filterSizes.length === 0) {
-        return res.status(400).json({ error: 'No valid filter sizes found' });
-      }
-
-      // Pack filters into boxes
-      boxesToShip = packFiltersIntoBoxes(filterSizes);
-
-    } else {
-      // EXPLICIT FORMAT: Single box with provided dimensions
-      if (!shipToAddress || !shipToCity || !shipToStateCode || !shipToPostalCode) {
-        return res.status(400).json({
-          error: 'Ship-to address required: shipToAddress, shipToCity, shipToStateCode, shipToPostalCode (or use addresses/sizes format)'
-        });
-      }
-      if (!weight || !length || !width || !height) {
-        return res.status(400).json({ error: 'Package dimensions required: weight, length, width, height' });
-      }
-
-      parsedAddress = {
-        street: shipToAddress,
-        city: shipToCity,
-        state: shipToStateCode,
-        postalCode: shipToPostalCode
-      };
-
-      boxesToShip = [{
-        length,
-        width,
-        height,
-        weight,
-        filterCount: 1
-      }];
+    // Validate filters
+    if (!filters) {
+      return res.status(400).json({
+        error: 'filters field is required'
+      });
     }
+
+    // Parse filters string to extract addresses and sizes
+    // Format: "(1)ID - HVAC ID: ... - Address: Street, City, ST, ZIP - size: LxWxH;;(2)..."
+    const filterEntries = filters.split(';;').map(f => f.trim()).filter(f => f.length > 0);
+
+    if (filterEntries.length === 0) {
+      return res.status(400).json({ error: 'No filters found in filters string' });
+    }
+
+    const extractedAddresses = [];
+    const extractedSizes = [];
+
+    for (const entry of filterEntries) {
+      // Extract address: look for "- Address: " followed by the address until " - size:"
+      const addressMatch = entry.match(/- Address:\s*(.+?)\s*- size:/i);
+      // Extract size: look for "- size: " followed by dimensions
+      const sizeMatch = entry.match(/- size:\s*(\d+x\d+x\d+)/i);
+
+      if (addressMatch && sizeMatch) {
+        extractedAddresses.push(addressMatch[1].trim());
+        extractedSizes.push(sizeMatch[1]);
+      }
+    }
+
+    if (extractedAddresses.length === 0 || extractedSizes.length === 0) {
+      return res.status(400).json({
+        error: 'Could not parse addresses/sizes from filters string',
+        hint: 'Expected format: "- Address: Street, City, ST, ZIP - size: LxWxH"'
+      });
+    }
+
+    // Get unique address (assuming single address for shipping)
+    const uniqueAddresses = [...new Set(extractedAddresses)];
+    if (uniqueAddresses.length > 1) {
+      return res.status(400).json({
+        error: 'Multiple addresses detected. /ship only supports single address. Use separate calls for each address.',
+        addressCount: uniqueAddresses.length,
+        addresses: uniqueAddresses
+      });
+    }
+
+    // Parse the address
+    const parsedAddress = parseAddress(uniqueAddresses[0]);
+    if (!parsedAddress) {
+      return res.status(400).json({
+        error: 'Could not parse address. Expected format: Street, City, ST, ZIPCODE',
+        invalidAddress: uniqueAddresses[0]
+      });
+    }
+
+    // Parse filter sizes
+    const filterSizes = extractedSizes.map(s => parseFilterSize(s)).filter(s => s !== null);
+    if (filterSizes.length === 0) {
+      return res.status(400).json({ error: 'No valid filter sizes found' });
+    }
+
+    // Pack filters into boxes
+    const boxesToShip = packFiltersIntoBoxes(filterSizes);
 
     // Create shipments for each box
     const shipmentResults = [];
@@ -713,7 +678,6 @@ router.post('/ship', async (req, res, next) => {
         shipFromPostalCode,
         shipFromCountryCode,
         shipToName,
-        shipToCompany,
         shipToPhone,
         shipToAddress: parsedAddress.street,
         shipToCity: parsedAddress.city,
@@ -721,11 +685,11 @@ router.post('/ship', async (req, res, next) => {
         shipToPostalCode: parsedAddress.postalCode,
         shipToCountryCode,
         weight: box.weight,
-        weightUnit,
+        weightUnit: 'LBS',
         length: box.length,
         width: box.width,
         height: box.height,
-        dimensionUnit,
+        dimensionUnit: 'IN',
         serviceCode,
         labelFormat
       });
