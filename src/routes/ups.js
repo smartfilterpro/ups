@@ -652,12 +652,14 @@ router.post('/ship', async (req, res, next) => {
       return res.status(400).json({ error: 'Shipment creation failed', raw: result });
     }
 
-    const packageResult = shipmentResponse.PackageResults;
-    const labelImage = packageResult?.ShippingLabel?.GraphicImage;
+    // PackageResults can be an array or single object
+    const packageResults = shipmentResponse.PackageResults;
+    const firstPackage = Array.isArray(packageResults) ? packageResults[0] : packageResults;
+    const labelImage = firstPackage?.ShippingLabel?.GraphicImage;
 
     res.json({
       success: true,
-      trackingNumber: packageResult?.TrackingNumber,
+      trackingNumber: firstPackage?.TrackingNumber,
       shipmentIdentificationNumber: shipmentResponse.ShipmentIdentificationNumber,
       service: SERVICE_CODES[serviceCode] || serviceCode,
       totalCharges: {
