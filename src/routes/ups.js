@@ -219,18 +219,21 @@ function packFiltersIntoBoxes(filters) {
 }
 
 /**
- * Parse address string to extract state and zip
+ * Parse address string to extract full address components
  * Format: "Street, City, ST, ZIPCODE" or "Street, City, ST, ZIPCODE-XXXX"
- * Returns: { state, postalCode }
+ * Returns: { street, city, state, postalCode, raw }
  */
 function parseAddress(addressStr) {
-  // Match state (2 letters) followed by zip (5 digits, optionally with -4 more)
-  // More flexible - doesn't require end of string
-  const match = addressStr.match(/,\s*([A-Z]{2}),\s*(\d{5}(?:-\d{4})?)/);
+  // Match: Street, City, ST, ZIPCODE
+  // Example: "934 South Clinton Street,  Baltimore, MD, 21224-5023"
+  const match = addressStr.match(/^(.+),\s*(.+),\s*([A-Z]{2}),\s*(\d{5}(?:-\d{4})?)$/);
   if (match) {
     return {
-      state: match[1],
-      postalCode: match[2].substring(0, 5) // Use 5-digit zip
+      street: match[1].trim(),
+      city: match[2].trim(),
+      state: match[3],
+      postalCode: match[4].substring(0, 5), // Use 5-digit zip
+      raw: addressStr
     };
   }
   return null;
@@ -504,7 +507,10 @@ router.post('/quote', async (req, res, next) => {
           const published = s.TotalCharges?.MonetaryValue;
           const cost = parseFloat(negotiated || published);
 
-          rates[serviceName] = cost;
+          rates[serviceName] = {
+            serviceCode: code,
+            cost: cost
+          };
         }
 
         boxRates.push({ box, rates });
@@ -514,31 +520,44 @@ router.post('/quote', async (req, res, next) => {
       const addressRates = {};
       for (const br of boxRates) {
         if (br.rates) {
-          for (const [service, cost] of Object.entries(br.rates)) {
-            addressRates[service] = (addressRates[service] || 0) + cost;
+          for (const [service, rateInfo] of Object.entries(br.rates)) {
+            if (!addressRates[service]) {
+              addressRates[service] = { serviceCode: rateInfo.serviceCode, cost: 0 };
+            }
+            addressRates[service].cost += rateInfo.cost;
           }
         }
       }
 
       // Round to 2 decimal places
       for (const service of Object.keys(addressRates)) {
-        addressRates[service] = Math.round(addressRates[service] * 100) / 100;
+        addressRates[service].cost = Math.round(addressRates[service].cost * 100) / 100;
 
         // Add to grand totals
-        serviceTotals[service] = (serviceTotals[service] || 0) + addressRates[service];
+        if (!serviceTotals[service]) {
+          serviceTotals[service] = { serviceCode: addressRates[service].serviceCode, cost: 0 };
+        }
+        serviceTotals[service].cost += addressRates[service].cost;
       }
 
       results.push({
         address,
         filterCount: filterSizes.length,
-        boxes: boxes.map(b => ({ dimensions: b.dimensions, filterCount: b.filterCount, weight: b.weight })),
+        boxes: boxes.map(b => ({
+          dimensions: b.dimensions,
+          length: b.length,
+          width: b.width,
+          height: b.height,
+          filterCount: b.filterCount,
+          weight: b.weight
+        })),
         rates: addressRates
       });
     }
 
     // Round grand totals
     for (const service of Object.keys(serviceTotals)) {
-      serviceTotals[service] = Math.round(serviceTotals[service] * 100) / 100;
+      serviceTotals[service].cost = Math.round(serviceTotals[service].cost * 100) / 100;
     }
 
     res.json({
