@@ -543,6 +543,7 @@ router.post('/quote', async (req, res, next) => {
       results.push({
         address,
         filterCount: filterSizes.length,
+        boxCount: boxes.length,
         boxes: boxes.map(b => ({
           dimensions: b.dimensions,
           length: b.length,
