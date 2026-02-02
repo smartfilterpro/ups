@@ -579,12 +579,12 @@ router.post('/ship', async (req, res, next) => {
       shipFromPostalCode = process.env.SHIP_FROM_POSTAL_CODE,
       shipFromCountryCode = 'US',
 
-      // Service
-      serviceCode = '03', // Default to Ground
-
       // Label
       labelFormat = 'GIF'
     } = req.body;
+
+    // Always use Ground shipping
+    const serviceCode = '03';
 
     // Validate ship-from
     if (!shipFromAddress || !shipFromCity || !shipFromStateCode || !shipFromPostalCode) {
