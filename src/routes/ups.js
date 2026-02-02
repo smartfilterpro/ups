@@ -604,50 +604,24 @@ router.get('/debug', (req, res) => {
  * POST /api/ups/ship
  * Create a shipment and get shipping label
  *
- * Request body:
+ * RECOMMENDED FORMAT - Filters string (from Bubble):
  * {
- *   // Ship To (required)
- *   shipToName: "John Doe",
- *   shipToCompany: "Acme Inc",  // optional
- *   shipToPhone: "5551234567",
- *   shipToAddress: "123 Main St",
- *   shipToCity: "Los Angeles",
- *   shipToStateCode: "CA",
- *   shipToPostalCode: "90001",
- *
- *   // Ship From (optional - defaults to environment vars)
- *   shipFromName: "SmartFilterPro",
- *   shipFromCompany: "SmartFilterPro",
- *   shipFromPhone: "5559876543",
- *   shipFromAddress: "456 Warehouse Blvd",
- *   shipFromCity: "Baltimore",
- *   shipFromStateCode: "MD",
- *   shipFromPostalCode: "21224",
- *
- *   // Package (required)
- *   weight: 5,
- *   length: 16,
- *   width: 20,
- *   height: 4,
- *
- *   // Service (optional, defaults to Ground)
- *   serviceCode: "03",
- *
- *   // Label format (optional, defaults to GIF)
- *   labelFormat: "GIF"  // GIF, PNG, PDF, ZPL
+ *   "shipToName": "John Doe",
+ *   "shipToPhone": "5551234567",
+ *   "filters": "(1)123x456 - HVAC ID: ... - Address: 934 South Clinton Street, Baltimore, MD, 21224-5023 - size: 16x24x1;;(2)..."
  * }
+ *
+ * The filters string is parsed to extract addresses and sizes automatically.
  */
 router.post('/ship', async (req, res, next) => {
   try {
     const {
+      // Filters string (recommended - from Bubble)
+      filters,
+
       // Ship To (required)
       shipToName,
-      shipToCompany,
       shipToPhone,
-      shipToAddress,
-      shipToCity,
-      shipToStateCode,
-      shipToPostalCode,
       shipToCountryCode = 'US',
 
       // Ship From (optional - use env vars as defaults)
@@ -660,96 +634,170 @@ router.post('/ship', async (req, res, next) => {
       shipFromPostalCode = process.env.SHIP_FROM_POSTAL_CODE,
       shipFromCountryCode = 'US',
 
-      // Package
-      weight,
-      length,
-      width,
-      height,
-      weightUnit = 'LBS',
-      dimensionUnit = 'IN',
-
-      // Service
-      serviceCode = '03', // Default to Ground
-
       // Label
       labelFormat = 'GIF'
     } = req.body;
 
-    // Validate ship-to
-    if (!shipToName || !shipToPhone || !shipToAddress || !shipToCity || !shipToStateCode || !shipToPostalCode) {
-      return res.status(400).json({
-        error: 'Ship-to details required: shipToName, shipToPhone, shipToAddress, shipToCity, shipToStateCode, shipToPostalCode'
-      });
-    }
+    // Always use Ground shipping
+    const serviceCode = '03';
 
     // Validate ship-from
     if (!shipFromAddress || !shipFromCity || !shipFromStateCode || !shipFromPostalCode) {
       return res.status(400).json({
-        error: 'Ship-from address not configured. Set SHIP_FROM_ADDRESS, SHIP_FROM_CITY, SHIP_FROM_STATE_CODE, SHIP_FROM_POSTAL_CODE environment variables or provide in request.'
+        error: 'Ship-from address not configured. Set SHIP_FROM_ADDRESS, SHIP_FROM_CITY, SHIP_FROM_STATE_CODE, SHIP_FROM_POSTAL_CODE environment variables.'
       });
     }
 
-    // Validate package
-    if (!weight || !length || !width || !height) {
-      return res.status(400).json({ error: 'Package weight and dimensions required (weight, length, width, height)' });
+    // Validate recipient info
+    if (!shipToName || !shipToPhone) {
+      return res.status(400).json({
+        error: 'Recipient details required: shipToName, shipToPhone'
+      });
     }
 
-    const result = await upsService.createShipment({
-      shipFromName,
-      shipFromCompany,
-      shipFromPhone,
-      shipFromAddress,
-      shipFromCity,
-      shipFromStateCode,
-      shipFromPostalCode,
-      shipFromCountryCode,
-      shipToName,
-      shipToCompany,
-      shipToPhone,
-      shipToAddress,
-      shipToCity,
-      shipToStateCode,
-      shipToPostalCode,
-      shipToCountryCode,
-      weight,
-      weightUnit,
-      length,
-      width,
-      height,
-      dimensionUnit,
-      serviceCode,
-      labelFormat
-    });
-
-    // Parse response
-    const shipmentResponse = result.ShipmentResponse?.ShipmentResults;
-    if (!shipmentResponse) {
-      return res.status(400).json({ error: 'Shipment creation failed', raw: result });
+    // Validate filters
+    if (!filters) {
+      return res.status(400).json({
+        error: 'filters field is required'
+      });
     }
 
-    // PackageResults can be an array or single object
-    const packageResults = shipmentResponse.PackageResults;
-    const firstPackage = Array.isArray(packageResults) ? packageResults[0] : packageResults;
-    const labelImage = firstPackage?.ShippingLabel?.GraphicImage;
+    // Parse filters string to extract addresses and sizes
+    // Format: "(1)ID - HVAC ID: ... - Address: Street, City, ST, ZIP - size: LxWxH;;(2)..."
+    const filterEntries = filters.split(';;').map(f => f.trim()).filter(f => f.length > 0);
+
+    if (filterEntries.length === 0) {
+      return res.status(400).json({ error: 'No filters found in filters string' });
+    }
+
+    const extractedAddresses = [];
+    const extractedSizes = [];
+
+    for (const entry of filterEntries) {
+      // Extract address: look for "- Address: " followed by the address until " - size:"
+      const addressMatch = entry.match(/- Address:\s*(.+?)\s*- size:/i);
+      // Extract size: look for "- size: " followed by dimensions
+      const sizeMatch = entry.match(/- size:\s*(\d+x\d+x\d+)/i);
+
+      if (addressMatch && sizeMatch) {
+        extractedAddresses.push(addressMatch[1].trim());
+        extractedSizes.push(sizeMatch[1]);
+      }
+    }
+
+    if (extractedAddresses.length === 0 || extractedSizes.length === 0) {
+      return res.status(400).json({
+        error: 'Could not parse addresses/sizes from filters string',
+        hint: 'Expected format: "- Address: Street, City, ST, ZIP - size: LxWxH"'
+      });
+    }
+
+    // Get unique address (assuming single address for shipping)
+    const uniqueAddresses = [...new Set(extractedAddresses)];
+    if (uniqueAddresses.length > 1) {
+      return res.status(400).json({
+        error: 'Multiple addresses detected. /ship only supports single address. Use separate calls for each address.',
+        addressCount: uniqueAddresses.length,
+        addresses: uniqueAddresses
+      });
+    }
+
+    // Parse the address
+    const parsedAddress = parseAddress(uniqueAddresses[0]);
+    if (!parsedAddress) {
+      return res.status(400).json({
+        error: 'Could not parse address. Expected format: Street, City, ST, ZIPCODE',
+        invalidAddress: uniqueAddresses[0]
+      });
+    }
+
+    // Parse filter sizes
+    const filterSizes = extractedSizes.map(s => parseFilterSize(s)).filter(s => s !== null);
+    if (filterSizes.length === 0) {
+      return res.status(400).json({ error: 'No valid filter sizes found' });
+    }
+
+    // Pack filters into boxes
+    const boxesToShip = packFiltersIntoBoxes(filterSizes);
+
+    // Create shipments for each box
+    const shipmentResults = [];
+    for (const box of boxesToShip) {
+      const result = await upsService.createShipment({
+        shipFromName,
+        shipFromCompany,
+        shipFromPhone,
+        shipFromAddress,
+        shipFromCity,
+        shipFromStateCode,
+        shipFromPostalCode,
+        shipFromCountryCode,
+        shipToName,
+        shipToPhone,
+        shipToAddress: parsedAddress.street,
+        shipToCity: parsedAddress.city,
+        shipToStateCode: parsedAddress.state,
+        shipToPostalCode: parsedAddress.postalCode,
+        shipToCountryCode,
+        weight: box.weight,
+        weightUnit: 'LBS',
+        length: box.length,
+        width: box.width,
+        height: box.height,
+        dimensionUnit: 'IN',
+        serviceCode,
+        labelFormat
+      });
+
+      const shipmentResponse = result.ShipmentResponse?.ShipmentResults;
+      if (!shipmentResponse) {
+        shipmentResults.push({ error: 'Shipment creation failed', raw: result });
+        continue;
+      }
+
+      const packageResults = shipmentResponse.PackageResults;
+      const firstPackage = Array.isArray(packageResults) ? packageResults[0] : packageResults;
+
+      shipmentResults.push({
+        trackingNumber: firstPackage?.TrackingNumber,
+        box: {
+          dimensions: `${box.length}x${box.width}x${box.height}`,
+          weight: box.weight,
+          filterCount: box.filterCount
+        },
+        charges: {
+          amount: shipmentResponse.ShipmentCharges?.TotalCharges?.MonetaryValue,
+          currency: shipmentResponse.ShipmentCharges?.TotalCharges?.CurrencyCode
+        },
+        label: {
+          format: labelFormat,
+          image: firstPackage?.ShippingLabel?.GraphicImage
+        }
+      });
+    }
+
+    // Calculate totals
+    const totalCharges = shipmentResults
+      .filter(r => r.charges)
+      .reduce((sum, r) => sum + parseFloat(r.charges.amount || 0), 0);
 
     res.json({
       success: true,
-      trackingNumber: firstPackage?.TrackingNumber,
-      shipmentIdentificationNumber: shipmentResponse.ShipmentIdentificationNumber,
       service: SERVICE_CODES[serviceCode] || serviceCode,
+      serviceCode,
+      shipTo: {
+        name: shipToName,
+        address: parsedAddress.street,
+        city: parsedAddress.city,
+        state: parsedAddress.state,
+        postalCode: parsedAddress.postalCode
+      },
+      boxCount: boxesToShip.length,
       totalCharges: {
-        amount: shipmentResponse.ShipmentCharges?.TotalCharges?.MonetaryValue,
-        currency: shipmentResponse.ShipmentCharges?.TotalCharges?.CurrencyCode
+        amount: Math.round(totalCharges * 100) / 100,
+        currency: 'USD'
       },
-      billingWeight: {
-        weight: shipmentResponse.BillingWeight?.Weight,
-        unit: shipmentResponse.BillingWeight?.UnitOfMeasurement?.Code
-      },
-      label: {
-        format: labelFormat,
-        image: labelImage // Base64 encoded
-      },
-      raw: result
+      shipments: shipmentResults
     });
 
   } catch (error) {
