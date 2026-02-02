@@ -183,6 +183,164 @@ class UPSService {
 
     return request;
   }
+
+  async createShipment(shipmentDetails) {
+    const token = await this.getAccessToken();
+
+    const requestBody = this.buildShipmentRequest(shipmentDetails);
+
+    const response = await fetch(`${this.getBaseUrl()}/api/shipments/v2409/ship`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json',
+        'transId': `ship-${Date.now()}`,
+        'transactionSrc': 'SmartFilterPro'
+      },
+      body: JSON.stringify(requestBody)
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(`UPS Shipping API error: ${error}`);
+    }
+
+    return response.json();
+  }
+
+  buildShipmentRequest(details) {
+    const {
+      // Ship From (your warehouse)
+      shipFromName,
+      shipFromCompany,
+      shipFromPhone,
+      shipFromAddress,
+      shipFromCity,
+      shipFromStateCode,
+      shipFromPostalCode,
+      shipFromCountryCode = 'US',
+      // Ship To (customer)
+      shipToName,
+      shipToCompany,
+      shipToPhone,
+      shipToAddress,
+      shipToCity,
+      shipToStateCode,
+      shipToPostalCode,
+      shipToCountryCode = 'US',
+      // Package
+      weight,
+      weightUnit = 'LBS',
+      length,
+      width,
+      height,
+      dimensionUnit = 'IN',
+      // Service
+      serviceCode = '03', // Default to Ground
+      // Label
+      labelFormat = 'GIF' // GIF, PNG, PDF, ZPL
+    } = details;
+
+    return {
+      ShipmentRequest: {
+        Request: {
+          SubVersion: '2403',
+          RequestOption: 'nonvalidate',
+          TransactionReference: {
+            CustomerContext: `Ship-${Date.now()}`
+          }
+        },
+        Shipment: {
+          Description: 'Air Filters',
+          Shipper: {
+            Name: shipFromCompany || shipFromName,
+            AttentionName: shipFromName,
+            Phone: {
+              Number: shipFromPhone
+            },
+            ShipperNumber: process.env.UPS_ACCOUNT_NUMBER,
+            Address: {
+              AddressLine: shipFromAddress,
+              City: shipFromCity,
+              StateProvinceCode: shipFromStateCode,
+              PostalCode: shipFromPostalCode,
+              CountryCode: shipFromCountryCode
+            }
+          },
+          ShipTo: {
+            Name: shipToCompany || shipToName,
+            AttentionName: shipToName,
+            Phone: {
+              Number: shipToPhone
+            },
+            Address: {
+              AddressLine: shipToAddress,
+              City: shipToCity,
+              StateProvinceCode: shipToStateCode,
+              PostalCode: shipToPostalCode,
+              CountryCode: shipToCountryCode
+            }
+          },
+          ShipFrom: {
+            Name: shipFromCompany || shipFromName,
+            AttentionName: shipFromName,
+            Phone: {
+              Number: shipFromPhone
+            },
+            Address: {
+              AddressLine: shipFromAddress,
+              City: shipFromCity,
+              StateProvinceCode: shipFromStateCode,
+              PostalCode: shipFromPostalCode,
+              CountryCode: shipFromCountryCode
+            }
+          },
+          PaymentInformation: {
+            ShipmentCharge: {
+              Type: '01', // Transportation
+              BillShipper: {
+                AccountNumber: process.env.UPS_ACCOUNT_NUMBER
+              }
+            }
+          },
+          Service: {
+            Code: serviceCode,
+            Description: 'UPS Service'
+          },
+          Package: {
+            Description: 'Air Filters',
+            Packaging: {
+              Code: '02', // Customer supplied package
+              Description: 'Package'
+            },
+            Dimensions: {
+              UnitOfMeasurement: {
+                Code: dimensionUnit
+              },
+              Length: String(length),
+              Width: String(width),
+              Height: String(height)
+            },
+            PackageWeight: {
+              UnitOfMeasurement: {
+                Code: weightUnit
+              },
+              Weight: String(weight)
+            }
+          }
+        },
+        LabelSpecification: {
+          LabelImageFormat: {
+            Code: labelFormat
+          },
+          LabelStockSize: {
+            Height: '6',
+            Width: '4'
+          }
+        }
+      }
+    };
+  }
 }
 
 module.exports = new UPSService();
