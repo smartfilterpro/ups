@@ -794,4 +794,81 @@ router.post('/ship', async (req, res, next) => {
   }
 });
 
+/**
+ * POST /api/ups/void
+ * Void/cancel a shipment by tracking number
+ *
+ * Can void single or multiple tracking numbers.
+ * Shipments can only be voided within 24 hours of creation (before pickup).
+ *
+ * REQUEST FORMAT (single):
+ * { "trackingNumber": "1Z..." }
+ *
+ * REQUEST FORMAT (multiple):
+ * { "trackingNumbers": ["1Z...", "1Z...", "1Z..."] }
+ *
+ * RESPONSE FORMAT:
+ * {
+ *   "success": true,
+ *   "voided": [
+ *     { "trackingNumber": "1Z...", "status": "Voided" }
+ *   ],
+ *   "failed": []
+ * }
+ */
+router.post('/void', async (req, res, next) => {
+  try {
+    const { trackingNumber, trackingNumbers } = req.body;
+
+    // Build list of tracking numbers to void
+    let numbersToVoid = [];
+    if (trackingNumbers && Array.isArray(trackingNumbers)) {
+      numbersToVoid = trackingNumbers;
+    } else if (trackingNumber) {
+      numbersToVoid = [trackingNumber];
+    }
+
+    if (numbersToVoid.length === 0) {
+      return res.status(400).json({
+        error: 'trackingNumber or trackingNumbers required'
+      });
+    }
+
+    const voided = [];
+    const failed = [];
+
+    for (const tn of numbersToVoid) {
+      try {
+        const result = await upsService.voidShipment(tn);
+
+        // Check if void was successful
+        const voidResponse = result.VoidShipmentResponse;
+        const status = voidResponse?.SummaryResult?.Status?.Description || 'Voided';
+
+        voided.push({
+          trackingNumber: tn,
+          status: status
+        });
+      } catch (error) {
+        failed.push({
+          trackingNumber: tn,
+          error: error.message
+        });
+      }
+    }
+
+    res.json({
+      success: failed.length === 0,
+      totalRequested: numbersToVoid.length,
+      totalVoided: voided.length,
+      totalFailed: failed.length,
+      voided,
+      failed
+    });
+
+  } catch (error) {
+    next(error);
+  }
+});
+
 module.exports = router;
