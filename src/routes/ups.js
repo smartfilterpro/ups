@@ -547,21 +547,40 @@ router.get('/debug', (req, res) => {
 
 /**
  * POST /api/ups/ship
- * Create a shipment and get shipping label
+ * Create shipments and get shipping labels
  *
- * RECOMMENDED FORMAT - Filters string (from Bubble):
+ * Supports multiple addresses - filters are grouped by address automatically.
+ *
+ * REQUEST FORMAT:
  * {
  *   "shipToName": "John Doe",
  *   "shipToPhone": "5551234567",
  *   "filters": "(1)123x456 - HVAC ID: ... - Address: 934 South Clinton Street, Baltimore, MD, 21224-5023 - size: 16x24x1;;(2)..."
  * }
  *
- * The filters string is parsed to extract addresses and sizes automatically.
+ * RESPONSE FORMAT:
+ * {
+ *   "success": true,
+ *   "totalAddresses": 2,
+ *   "totalBoxes": 5,
+ *   "totalCharges": { "amount": 45.00, "currency": "USD" },
+ *   "addresses": [
+ *     {
+ *       "address": { "street": "...", "city": "...", "state": "...", "postalCode": "..." },
+ *       "filterCount": 3,
+ *       "boxCount": 2,
+ *       "charges": { "amount": 25.00, "currency": "USD" },
+ *       "shipments": [
+ *         { "trackingNumber": "1Z...", "box": {...}, "label": {...} }
+ *       ]
+ *     }
+ *   ]
+ * }
  */
 router.post('/ship', async (req, res, next) => {
   try {
     const {
-      // Filters string (recommended - from Bubble)
+      // Filters string (from Bubble)
       filters,
 
       // Ship To (required)
@@ -615,8 +634,8 @@ router.post('/ship', async (req, res, next) => {
       return res.status(400).json({ error: 'No filters found in filters string' });
     }
 
-    const extractedAddresses = [];
-    const extractedSizes = [];
+    // Group filters by address
+    const filtersByAddress = {};
 
     for (const entry of filterEntries) {
       // Extract address: look for "- Address: " followed by the address until " - size:"
@@ -625,124 +644,149 @@ router.post('/ship', async (req, res, next) => {
       const sizeMatch = entry.match(/- size:\s*(\d+x\d+x\d+)/i);
 
       if (addressMatch && sizeMatch) {
-        extractedAddresses.push(addressMatch[1].trim());
-        extractedSizes.push(sizeMatch[1]);
+        const addressRaw = addressMatch[1].trim();
+        const size = sizeMatch[1];
+
+        if (!filtersByAddress[addressRaw]) {
+          filtersByAddress[addressRaw] = [];
+        }
+        filtersByAddress[addressRaw].push(size);
       }
     }
 
-    if (extractedAddresses.length === 0 || extractedSizes.length === 0) {
+    const addressKeys = Object.keys(filtersByAddress);
+    if (addressKeys.length === 0) {
       return res.status(400).json({
         error: 'Could not parse addresses/sizes from filters string',
         hint: 'Expected format: "- Address: Street, City, ST, ZIP - size: LxWxH"'
       });
     }
 
-    // Get unique address (assuming single address for shipping)
-    const uniqueAddresses = [...new Set(extractedAddresses)];
-    if (uniqueAddresses.length > 1) {
-      return res.status(400).json({
-        error: 'Multiple addresses detected. /ship only supports single address. Use separate calls for each address.',
-        addressCount: uniqueAddresses.length,
-        addresses: uniqueAddresses
-      });
-    }
+    // Process each address
+    const addressResults = [];
+    let totalBoxCount = 0;
+    let grandTotalCharges = 0;
 
-    // Parse the address
-    const parsedAddress = parseAddress(uniqueAddresses[0]);
-    if (!parsedAddress) {
-      return res.status(400).json({
-        error: 'Could not parse address. Expected format: Street, City, ST, ZIPCODE',
-        invalidAddress: uniqueAddresses[0]
-      });
-    }
+    for (const addressRaw of addressKeys) {
+      const sizes = filtersByAddress[addressRaw];
 
-    // Parse filter sizes
-    const filterSizes = extractedSizes.map(s => parseFilterSize(s)).filter(s => s !== null);
-    if (filterSizes.length === 0) {
-      return res.status(400).json({ error: 'No valid filter sizes found' });
-    }
-
-    // Pack filters into boxes
-    const boxesToShip = packFiltersIntoBoxes(filterSizes);
-
-    // Create shipments for each box
-    const shipmentResults = [];
-    for (const box of boxesToShip) {
-      const result = await upsService.createShipment({
-        shipFromName,
-        shipFromCompany,
-        shipFromPhone,
-        shipFromAddress,
-        shipFromCity,
-        shipFromStateCode,
-        shipFromPostalCode,
-        shipFromCountryCode,
-        shipToName,
-        shipToPhone,
-        shipToAddress: parsedAddress.street,
-        shipToCity: parsedAddress.city,
-        shipToStateCode: parsedAddress.state,
-        shipToPostalCode: parsedAddress.postalCode,
-        shipToCountryCode,
-        weight: box.weight,
-        weightUnit: 'LBS',
-        length: box.length,
-        width: box.width,
-        height: box.height,
-        dimensionUnit: 'IN',
-        serviceCode,
-        labelFormat
-      });
-
-      const shipmentResponse = result.ShipmentResponse?.ShipmentResults;
-      if (!shipmentResponse) {
-        shipmentResults.push({ error: 'Shipment creation failed', raw: result });
+      // Parse the address
+      const parsedAddress = parseAddress(addressRaw);
+      if (!parsedAddress) {
+        addressResults.push({
+          error: 'Could not parse address',
+          invalidAddress: addressRaw
+        });
         continue;
       }
 
-      const packageResults = shipmentResponse.PackageResults;
-      const firstPackage = Array.isArray(packageResults) ? packageResults[0] : packageResults;
+      // Parse filter sizes for this address
+      const filterSizes = sizes.map(s => parseFilterSize(s)).filter(s => s !== null);
+      if (filterSizes.length === 0) {
+        addressResults.push({
+          error: 'No valid filter sizes found',
+          address: addressRaw
+        });
+        continue;
+      }
 
-      shipmentResults.push({
-        trackingNumber: firstPackage?.TrackingNumber,
-        box: {
-          dimensions: `${box.length}x${box.width}x${box.height}`,
+      // Pack filters into boxes
+      const boxesToShip = packFiltersIntoBoxes(filterSizes);
+      totalBoxCount += boxesToShip.length;
+
+      // Create shipments for each box at this address
+      const shipmentResults = [];
+      let addressCharges = 0;
+
+      for (const box of boxesToShip) {
+        const result = await upsService.createShipment({
+          shipFromName,
+          shipFromCompany,
+          shipFromPhone,
+          shipFromAddress,
+          shipFromCity,
+          shipFromStateCode,
+          shipFromPostalCode,
+          shipFromCountryCode,
+          shipToName,
+          shipToPhone,
+          shipToAddress: parsedAddress.street,
+          shipToCity: parsedAddress.city,
+          shipToStateCode: parsedAddress.state,
+          shipToPostalCode: parsedAddress.postalCode,
+          shipToCountryCode,
           weight: box.weight,
-          filterCount: box.filterCount
-        },
-        charges: {
-          amount: shipmentResponse.ShipmentCharges?.TotalCharges?.MonetaryValue,
-          currency: shipmentResponse.ShipmentCharges?.TotalCharges?.CurrencyCode
-        },
-        label: {
-          format: labelFormat,
-          image: firstPackage?.ShippingLabel?.GraphicImage
+          weightUnit: 'LBS',
+          length: box.length,
+          width: box.width,
+          height: box.height,
+          dimensionUnit: 'IN',
+          serviceCode,
+          labelFormat
+        });
+
+        const shipmentResponse = result.ShipmentResponse?.ShipmentResults;
+        if (!shipmentResponse) {
+          shipmentResults.push({ error: 'Shipment creation failed', raw: result });
+          continue;
         }
+
+        const packageResults = shipmentResponse.PackageResults;
+        const firstPackage = Array.isArray(packageResults) ? packageResults[0] : packageResults;
+        const chargeAmount = parseFloat(shipmentResponse.ShipmentCharges?.TotalCharges?.MonetaryValue || 0);
+        addressCharges += chargeAmount;
+
+        shipmentResults.push({
+          trackingNumber: firstPackage?.TrackingNumber,
+          box: {
+            dimensions: `${box.length}x${box.width}x${box.height}`,
+            weight: box.weight,
+            filterCount: box.filterCount
+          },
+          charges: {
+            amount: chargeAmount,
+            currency: shipmentResponse.ShipmentCharges?.TotalCharges?.CurrencyCode || 'USD'
+          },
+          label: {
+            format: labelFormat,
+            image: firstPackage?.ShippingLabel?.GraphicImage
+          }
+        });
+      }
+
+      grandTotalCharges += addressCharges;
+
+      addressResults.push({
+        address: {
+          street: parsedAddress.street,
+          city: parsedAddress.city,
+          state: parsedAddress.state,
+          postalCode: parsedAddress.postalCode,
+          raw: addressRaw
+        },
+        filterCount: filterSizes.length,
+        boxCount: boxesToShip.length,
+        charges: {
+          amount: Math.round(addressCharges * 100) / 100,
+          currency: 'USD'
+        },
+        shipments: shipmentResults
       });
     }
-
-    // Calculate totals
-    const totalCharges = shipmentResults
-      .filter(r => r.charges)
-      .reduce((sum, r) => sum + parseFloat(r.charges.amount || 0), 0);
 
     res.json({
       success: true,
       service: SERVICE_CODES[serviceCode] || serviceCode,
       serviceCode,
-      shipTo: {
-        name: shipToName,
-        address: parsedAddress.street,
-        city: parsedAddress.city,
-        state: parsedAddress.state,
-        postalCode: parsedAddress.postalCode
-      },
-      boxCount: boxesToShip.length,
+      shipToName,
+      shipToPhone,
+      totalAddresses: addressKeys.length,
+      totalBoxes: totalBoxCount,
       totalCharges: {
-        amount: Math.round(totalCharges * 100) / 100,
+        amount: Math.round(grandTotalCharges * 100) / 100,
         currency: 'USD'
       },
-      shipments: shipmentResults
+      addresses: addressResults
     });
 
   } catch (error) {
