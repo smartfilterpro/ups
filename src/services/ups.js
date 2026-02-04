@@ -341,6 +341,30 @@ class UPSService {
       }
     };
   }
+
+  async voidShipment(trackingNumber) {
+    const token = await this.getAccessToken();
+
+    const response = await fetch(
+      `${this.getBaseUrl()}/api/shipments/v2409/void/cancel/${trackingNumber}`,
+      {
+        method: 'DELETE',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+          'transId': `void-${Date.now()}`,
+          'transactionSrc': 'SmartFilterPro'
+        }
+      }
+    );
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(`UPS Void API error: ${error}`);
+    }
+
+    return response.json();
+  }
 }
 
 module.exports = new UPSService();
