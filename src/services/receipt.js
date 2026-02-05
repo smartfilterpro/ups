@@ -69,10 +69,15 @@ class ReceiptService {
     // Logo section - embed SVG or use text fallback
     let logoSection;
     if (logoSvg) {
-      // Extract just the SVG content and scale it
+      // Extract just the SVG content, remove comments and XML declaration
+      const cleanedLogo = logoSvg
+        .replace(/<\?xml[^?]*\?>/g, '')
+        .replace(/<!--[\s\S]*?-->/g, '')
+        .replace(/<svg[^>]*>/, '')
+        .replace(/<\/svg>/, '');
       logoSection = `
         <g transform="translate(50, 30) scale(0.8)">
-          ${logoSvg.replace(/<\?xml[^?]*\?>/g, '').replace(/<svg[^>]*>/, '').replace(/<\/svg>/, '')}
+          ${cleanedLogo}
         </g>
       `;
     } else {
@@ -84,44 +89,33 @@ class ReceiptService {
 
     const svg = `<?xml version="1.0" encoding="UTF-8"?>
 <svg width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg">
-  <!-- Background -->
   <rect width="100%" height="100%" fill="white"/>
 
-  <!-- Logo -->
   ${logoSection}
 
-  <!-- Packing Slip Title -->
   <text x="50" y="180" font-family="DejaVu Sans, Liberation Sans, sans-serif" font-size="28" font-weight="bold" fill="#333">PACKING SLIP</text>
 
-  <!-- Divider -->
   <line x1="50" y1="200" x2="550" y2="200" stroke="#ccc" stroke-width="2"/>
 
-  <!-- Ship To Section -->
   <text x="50" y="245" font-family="DejaVu Sans, Liberation Sans, sans-serif" font-size="18" font-weight="bold" fill="#666">SHIP TO:</text>
   <text x="50" y="280" font-family="DejaVu Sans, Liberation Sans, sans-serif" font-size="24" font-weight="bold" fill="#333">${escapeXml(shipToName || '')}</text>
   <text x="50" y="310" font-family="DejaVu Sans, Liberation Sans, sans-serif" font-size="20" fill="#333">${escapeXml(shipToAddress || '')}</text>
   <text x="50" y="340" font-family="DejaVu Sans, Liberation Sans, sans-serif" font-size="20" fill="#333">${escapeXml(shipToCity || '')}${shipToCity && shipToState ? ', ' : ''}${escapeXml(shipToState || '')} ${escapeXml(shipToZip || '')}</text>
 
-  <!-- Divider -->
   <line x1="50" y1="370" x2="550" y2="370" stroke="#ccc" stroke-width="2"/>
 
-  <!-- Order Info -->
   ${orderNumber ? `<text x="50" y="410" font-family="DejaVu Sans, Liberation Sans, sans-serif" font-size="18" fill="#666">Order: <tspan font-weight="bold" fill="#333">${escapeXml(orderNumber)}</tspan></text>` : ''}
   ${orderDate ? `<text x="350" y="410" font-family="DejaVu Sans, Liberation Sans, sans-serif" font-size="18" fill="#666">Date: <tspan fill="#333">${escapeXml(orderDate)}</tspan></text>` : ''}
 
-  <!-- Items Section -->
   <text x="50" y="455" font-family="DejaVu Sans, Liberation Sans, sans-serif" font-size="18" font-weight="bold" fill="#666">ITEMS:</text>
 
   ${itemLines}
 
-  <!-- Divider -->
   <line x1="50" y1="${500 + (items.length * 35)}" x2="550" y2="${500 + (items.length * 35)}" stroke="#ccc" stroke-width="2"/>
 
-  <!-- Summary -->
   <text x="50" y="${550 + (items.length * 35)}" font-family="DejaVu Sans, Liberation Sans, sans-serif" font-size="22" fill="#333">Total Filters: <tspan font-weight="bold">${totalQty}</tspan></text>
   ${boxInfo ? `<text x="350" y="${550 + (items.length * 35)}" font-family="DejaVu Sans, Liberation Sans, sans-serif" font-size="22" fill="#333">${escapeXml(boxInfo)}</text>` : ''}
 
-  <!-- Footer -->
   <text x="300" y="${height - 40}" font-family="DejaVu Sans, Liberation Sans, sans-serif" font-size="16" fill="#999" text-anchor="middle">Thank you for your order!</text>
 </svg>`;
 
