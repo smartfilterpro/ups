@@ -55,7 +55,7 @@ class ReceiptService {
       const y = 480 + (index * 35);
       const qty = item.qty || 1;
       const filter = item.filter || item.Filter || 'Filter';
-      return `<text x="50" y="${y}" font-family="Arial, sans-serif" font-size="22" fill="#333">(${qty}) ${filter}</text>`;
+      return `<text x="50" y="${y}" font-family="DejaVu Sans, Liberation Sans, sans-serif" font-size="22" fill="#333">(${qty}) ${escapeXml(filter)}</text>`;
     }).join('\n    ');
 
     // Calculate total quantity
@@ -77,8 +77,8 @@ class ReceiptService {
       `;
     } else {
       logoSection = `
-        <text x="50" y="70" font-family="Arial, sans-serif" font-size="36" font-weight="bold" fill="#8B9B6B">Smart</text>
-        <text x="50" y="110" font-family="Arial, sans-serif" font-size="36" fill="#333">Filter<tspan font-weight="bold" fill="#8B9B6B">PRO</tspan></text>
+        <text x="50" y="70" font-family="DejaVu Sans, Liberation Sans, sans-serif" font-size="36" font-weight="bold" fill="#8B9B6B">Smart</text>
+        <text x="50" y="110" font-family="DejaVu Sans, Liberation Sans, sans-serif" font-size="36" fill="#333">Filter<tspan font-weight="bold" fill="#8B9B6B">PRO</tspan></text>
       `;
     }
 
@@ -91,26 +91,26 @@ class ReceiptService {
   ${logoSection}
 
   <!-- Packing Slip Title -->
-  <text x="50" y="180" font-family="Arial, sans-serif" font-size="28" font-weight="bold" fill="#333">PACKING SLIP</text>
+  <text x="50" y="180" font-family="DejaVu Sans, Liberation Sans, sans-serif" font-size="28" font-weight="bold" fill="#333">PACKING SLIP</text>
 
   <!-- Divider -->
   <line x1="50" y1="200" x2="550" y2="200" stroke="#ccc" stroke-width="2"/>
 
   <!-- Ship To Section -->
-  <text x="50" y="245" font-family="Arial, sans-serif" font-size="18" font-weight="bold" fill="#666">SHIP TO:</text>
-  <text x="50" y="280" font-family="Arial, sans-serif" font-size="24" font-weight="bold" fill="#333">${escapeXml(shipToName || '')}</text>
-  <text x="50" y="310" font-family="Arial, sans-serif" font-size="20" fill="#333">${escapeXml(shipToAddress || '')}</text>
-  <text x="50" y="340" font-family="Arial, sans-serif" font-size="20" fill="#333">${escapeXml(shipToCity || '')}${shipToCity && shipToState ? ', ' : ''}${escapeXml(shipToState || '')} ${escapeXml(shipToZip || '')}</text>
+  <text x="50" y="245" font-family="DejaVu Sans, Liberation Sans, sans-serif" font-size="18" font-weight="bold" fill="#666">SHIP TO:</text>
+  <text x="50" y="280" font-family="DejaVu Sans, Liberation Sans, sans-serif" font-size="24" font-weight="bold" fill="#333">${escapeXml(shipToName || '')}</text>
+  <text x="50" y="310" font-family="DejaVu Sans, Liberation Sans, sans-serif" font-size="20" fill="#333">${escapeXml(shipToAddress || '')}</text>
+  <text x="50" y="340" font-family="DejaVu Sans, Liberation Sans, sans-serif" font-size="20" fill="#333">${escapeXml(shipToCity || '')}${shipToCity && shipToState ? ', ' : ''}${escapeXml(shipToState || '')} ${escapeXml(shipToZip || '')}</text>
 
   <!-- Divider -->
   <line x1="50" y1="370" x2="550" y2="370" stroke="#ccc" stroke-width="2"/>
 
   <!-- Order Info -->
-  ${orderNumber ? `<text x="50" y="410" font-family="Arial, sans-serif" font-size="18" fill="#666">Order: <tspan font-weight="bold" fill="#333">${escapeXml(orderNumber)}</tspan></text>` : ''}
-  ${orderDate ? `<text x="350" y="410" font-family="Arial, sans-serif" font-size="18" fill="#666">Date: <tspan fill="#333">${escapeXml(orderDate)}</tspan></text>` : ''}
+  ${orderNumber ? `<text x="50" y="410" font-family="DejaVu Sans, Liberation Sans, sans-serif" font-size="18" fill="#666">Order: <tspan font-weight="bold" fill="#333">${escapeXml(orderNumber)}</tspan></text>` : ''}
+  ${orderDate ? `<text x="350" y="410" font-family="DejaVu Sans, Liberation Sans, sans-serif" font-size="18" fill="#666">Date: <tspan fill="#333">${escapeXml(orderDate)}</tspan></text>` : ''}
 
   <!-- Items Section -->
-  <text x="50" y="455" font-family="Arial, sans-serif" font-size="18" font-weight="bold" fill="#666">ITEMS:</text>
+  <text x="50" y="455" font-family="DejaVu Sans, Liberation Sans, sans-serif" font-size="18" font-weight="bold" fill="#666">ITEMS:</text>
 
   ${itemLines}
 
@@ -118,11 +118,11 @@ class ReceiptService {
   <line x1="50" y1="${500 + (items.length * 35)}" x2="550" y2="${500 + (items.length * 35)}" stroke="#ccc" stroke-width="2"/>
 
   <!-- Summary -->
-  <text x="50" y="${550 + (items.length * 35)}" font-family="Arial, sans-serif" font-size="22" fill="#333">Total Filters: <tspan font-weight="bold">${totalQty}</tspan></text>
-  ${boxInfo ? `<text x="350" y="${550 + (items.length * 35)}" font-family="Arial, sans-serif" font-size="22" fill="#333">${escapeXml(boxInfo)}</text>` : ''}
+  <text x="50" y="${550 + (items.length * 35)}" font-family="DejaVu Sans, Liberation Sans, sans-serif" font-size="22" fill="#333">Total Filters: <tspan font-weight="bold">${totalQty}</tspan></text>
+  ${boxInfo ? `<text x="350" y="${550 + (items.length * 35)}" font-family="DejaVu Sans, Liberation Sans, sans-serif" font-size="22" fill="#333">${escapeXml(boxInfo)}</text>` : ''}
 
   <!-- Footer -->
-  <text x="300" y="${height - 40}" font-family="Arial, sans-serif" font-size="16" fill="#999" text-anchor="middle">Thank you for your order!</text>
+  <text x="300" y="${height - 40}" font-family="DejaVu Sans, Liberation Sans, sans-serif" font-size="16" fill="#999" text-anchor="middle">Thank you for your order!</text>
 </svg>`;
 
     return svg;
