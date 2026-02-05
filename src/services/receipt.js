@@ -8,6 +8,19 @@ class ReceiptService {
     this.logoCache = null;
   }
 
+  // Convert all colors in SVG to black for thermal printing
+  thermalizeColors(svgText) {
+    return svgText
+      // Replace fill colors with black (but not fill="none")
+      .replace(/fill="(?!none)[^"]*"/gi, 'fill="#000"')
+      // Replace stroke colors with black (but not stroke="none")
+      .replace(/stroke="(?!none)[^"]*"/gi, 'stroke="#000"')
+      // Replace fill in style attributes
+      .replace(/fill:\s*(?!none)[^;}"']+/gi, 'fill:#000')
+      // Replace stroke in style attributes
+      .replace(/stroke:\s*(?!none)[^;}"']+/gi, 'stroke:#000');
+  }
+
   async fetchLogo() {
     if (this.logoCache) {
       return this.logoCache;
@@ -19,8 +32,9 @@ class ReceiptService {
       const response = await fetch(logoUrl);
       if (response.ok) {
         const svgText = await response.text();
-        this.logoCache = svgText;
-        return svgText;
+        // Convert logo colors to black for thermal printing
+        this.logoCache = this.thermalizeColors(svgText);
+        return this.logoCache;
       }
     } catch (error) {
       console.error('Failed to fetch logo:', error.message);
@@ -79,8 +93,8 @@ class ReceiptService {
       `;
     } else {
       logoSection = `
-        <text x="20" y="45" font-family="DejaVu Sans, Liberation Sans, sans-serif" font-size="24" font-weight="bold" fill="#8B9B6B">Smart</text>
-        <text x="20" y="70" font-family="DejaVu Sans, Liberation Sans, sans-serif" font-size="24" fill="#333">Filter<tspan font-weight="bold" fill="#8B9B6B">PRO</tspan></text>
+        <text x="20" y="45" font-family="DejaVu Sans, Liberation Sans, sans-serif" font-size="24" font-weight="bold" fill="#000">Smart</text>
+        <text x="20" y="70" font-family="DejaVu Sans, Liberation Sans, sans-serif" font-size="24" fill="#000">Filter<tspan font-weight="bold" fill="#000">PRO</tspan></text>
       `;
     }
 
