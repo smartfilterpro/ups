@@ -170,7 +170,7 @@ function estimateFilterWeight(length, width, depth) {
 
 /**
  * Pack filters into boxes with max 4" depth per box
- * Returns array of boxes with dimensions and weight
+ * Returns array of boxes with dimensions, weight, and filter IDs
  */
 function packFiltersIntoBoxes(filters) {
   const MAX_DEPTH = 4;
@@ -208,14 +208,15 @@ function packFiltersIntoBoxes(filters) {
     }
   }
 
-  // Finalize box dimensions
+  // Finalize box dimensions and collect filter IDs
   return boxes.map(box => ({
     dimensions: `${box.length}x${box.width}x${box.currentDepth}`,
     length: box.length,
     width: box.width,
     height: box.currentDepth,
     filterCount: box.filters.length,
-    weight: Math.round(box.weight * 10) / 10
+    weight: Math.round(box.weight * 10) / 10,
+    filterIds: box.filters.map(f => f.filterId).filter(id => id).join(', ')
   }));
 }
 
@@ -694,19 +695,23 @@ router.post('/ship', async (req, res, next) => {
     const filtersByAddress = {};
 
     for (const entry of filterEntries) {
+      // Extract filter ID: the string after (N) and before " - "
+      // Format: (1)1768251603172x342790393626493100 - HVAC ID: ...
+      const filterIdMatch = entry.match(/^\s*\(\d+\)\s*([^\s-]+)/);
       // Extract address: look for "- Address: " followed by the address until " - size:"
       const addressMatch = entry.match(/- Address:\s*(.+?)\s*- size:/i);
       // Extract size: look for "- size: " followed by dimensions
       const sizeMatch = entry.match(/- size:\s*(\d+x\d+x\d+)/i);
 
       if (addressMatch && sizeMatch) {
+        const filterId = filterIdMatch ? filterIdMatch[1].trim() : null;
         const addressRaw = addressMatch[1].trim();
         const size = sizeMatch[1];
 
         if (!filtersByAddress[addressRaw]) {
           filtersByAddress[addressRaw] = [];
         }
-        filtersByAddress[addressRaw].push(size);
+        filtersByAddress[addressRaw].push({ size, filterId });
       }
     }
 
@@ -736,8 +741,14 @@ router.post('/ship', async (req, res, next) => {
         continue;
       }
 
-      // Parse filter sizes for this address
-      const filterSizes = sizes.map(s => parseFilterSize(s)).filter(s => s !== null);
+      // Parse filter sizes for this address (now sizes is an array of { size, filterId })
+      const filterSizes = sizes.map(item => {
+        const parsed = parseFilterSize(item.size);
+        if (parsed) {
+          parsed.filterId = item.filterId;
+        }
+        return parsed;
+      }).filter(s => s !== null);
       if (filterSizes.length === 0) {
         addressResults.push({
           error: 'No valid filter sizes found',
@@ -794,6 +805,7 @@ router.post('/ship', async (req, res, next) => {
 
         shipmentResults.push({
           trackingNumber: firstPackage?.TrackingNumber,
+          filterIds: box.filterIds || '',
           box: {
             dimensions: `${box.length}x${box.width}x${box.height}`,
             weight: box.weight,
