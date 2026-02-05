@@ -53,7 +53,7 @@ class ReceiptService {
       const y = 195 + (index * 22);
       const qty = item.qty || 1;
       const filter = item.filter || item.Filter || 'Filter';
-      return `<text x="320" y="${y}" font-family="DejaVu Sans, Liberation Sans, sans-serif" font-size="14" fill="#333">(${qty}) ${escapeXml(filter)}</text>`;
+      return `<text x="320" y="${y}" font-family="DejaVu Sans, Liberation Sans, sans-serif" font-size="14" fill="#000">(${qty}) ${escapeXml(filter)}</text>`;
     }).join('\n    ');
 
     // Calculate total quantity
@@ -91,28 +91,28 @@ class ReceiptService {
 
   ${logoSection}
 
-  <text x="200" y="50" font-family="DejaVu Sans, Liberation Sans, sans-serif" font-size="20" font-weight="bold" fill="#333">PACKING SLIP</text>
+  <text x="200" y="50" font-family="DejaVu Sans, Liberation Sans, sans-serif" font-size="20" font-weight="bold" fill="#000">PACKING SLIP</text>
 
   <line x1="20" y1="85" x2="580" y2="85" stroke="#000" stroke-width="1"/>
 
-  <text x="20" y="105" font-family="DejaVu Sans, Liberation Sans, sans-serif" font-size="12" font-weight="bold" fill="#666">SHIP TO:</text>
-  <text x="20" y="125" font-family="DejaVu Sans, Liberation Sans, sans-serif" font-size="16" font-weight="bold" fill="#333">${escapeXml(shipToName || '')}</text>
-  <text x="20" y="145" font-family="DejaVu Sans, Liberation Sans, sans-serif" font-size="14" fill="#333">${escapeXml(shipToAddress || '')}</text>
-  <text x="20" y="165" font-family="DejaVu Sans, Liberation Sans, sans-serif" font-size="14" fill="#333">${escapeXml(shipToCity || '')}${shipToCity && shipToState ? ', ' : ''}${escapeXml(shipToState || '')} ${escapeXml(shipToZip || '')}</text>
+  <text x="20" y="105" font-family="DejaVu Sans, Liberation Sans, sans-serif" font-size="12" font-weight="bold" fill="#000">SHIP TO:</text>
+  <text x="20" y="125" font-family="DejaVu Sans, Liberation Sans, sans-serif" font-size="16" font-weight="bold" fill="#000">${escapeXml(shipToName || '')}</text>
+  <text x="20" y="145" font-family="DejaVu Sans, Liberation Sans, sans-serif" font-size="14" fill="#000">${escapeXml(shipToAddress || '')}</text>
+  <text x="20" y="165" font-family="DejaVu Sans, Liberation Sans, sans-serif" font-size="14" fill="#000">${escapeXml(shipToCity || '')}${shipToCity && shipToState ? ', ' : ''}${escapeXml(shipToState || '')} ${escapeXml(shipToZip || '')}</text>
 
-  <line x1="300" y1="95" x2="300" y2="300" stroke="#ccc" stroke-width="1"/>
+  <line x1="300" y1="95" x2="300" y2="300" stroke="#000" stroke-width="1"/>
 
-  <text x="320" y="105" font-family="DejaVu Sans, Liberation Sans, sans-serif" font-size="12" font-weight="bold" fill="#666">ITEMS:</text>
+  <text x="320" y="105" font-family="DejaVu Sans, Liberation Sans, sans-serif" font-size="12" font-weight="bold" fill="#000">ITEMS:</text>
   ${itemLines}
 
   <line x1="20" y1="310" x2="580" y2="310" stroke="#000" stroke-width="1"/>
 
-  ${orderNumber ? `<text x="20" y="330" font-family="DejaVu Sans, Liberation Sans, sans-serif" font-size="12" fill="#666">Order: <tspan font-weight="bold" fill="#333">${escapeXml(orderNumber)}</tspan></text>` : ''}
-  ${orderDate ? `<text x="150" y="330" font-family="DejaVu Sans, Liberation Sans, sans-serif" font-size="12" fill="#666">Date: <tspan fill="#333">${escapeXml(orderDate)}</tspan></text>` : ''}
-  <text x="320" y="330" font-family="DejaVu Sans, Liberation Sans, sans-serif" font-size="14" fill="#333">Total Filters: <tspan font-weight="bold">${totalQty}</tspan></text>
-  ${boxInfo ? `<text x="480" y="330" font-family="DejaVu Sans, Liberation Sans, sans-serif" font-size="14" fill="#333">${escapeXml(boxInfo)}</text>` : ''}
+  ${orderNumber ? `<text x="20" y="330" font-family="DejaVu Sans, Liberation Sans, sans-serif" font-size="12" font-weight="bold" fill="#000">Order: <tspan font-weight="bold" fill="#000">${escapeXml(orderNumber)}</tspan></text>` : ''}
+  ${orderDate ? `<text x="150" y="330" font-family="DejaVu Sans, Liberation Sans, sans-serif" font-size="12" font-weight="bold" fill="#000">Date: <tspan fill="#000">${escapeXml(orderDate)}</tspan></text>` : ''}
+  <text x="320" y="330" font-family="DejaVu Sans, Liberation Sans, sans-serif" font-size="14" font-weight="bold" fill="#000">Total Filters: <tspan font-weight="bold">${totalQty}</tspan></text>
+  ${boxInfo ? `<text x="480" y="330" font-family="DejaVu Sans, Liberation Sans, sans-serif" font-size="14" font-weight="bold" fill="#000">${escapeXml(boxInfo)}</text>` : ''}
 
-  <text x="300" y="370" font-family="DejaVu Sans, Liberation Sans, sans-serif" font-size="12" fill="#999" text-anchor="middle">Thank you for your order!</text>
+  <text x="300" y="370" font-family="DejaVu Sans, Liberation Sans, sans-serif" font-size="12" fill="#000" text-anchor="middle">Thank you for your order!</text>
 </svg>`;
 
     return svg;
