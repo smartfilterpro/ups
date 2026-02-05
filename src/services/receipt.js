@@ -45,10 +45,9 @@ class ReceiptService {
       logoSvg
     } = data;
 
-    // 4x6 inches at 203 DPI (thermal printer standard) = 812 x 1218 pixels
-    // Using 600x900 for good quality while keeping file size reasonable
-    const width = 600;
-    const height = 900;
+    // 4x6 inches portrait orientation (same as shipping label)
+    const width = 400;
+    const height = 600;
 
     // Build items list
     const itemLines = items.map((item, index) => {
