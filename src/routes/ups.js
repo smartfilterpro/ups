@@ -952,10 +952,12 @@ router.post('/void', async (req, res, next) => {
  * {
  *   "success": true,
  *   "receipt": {
- *     "format": "PNG",
+ *     "format": "SVG",
  *     "image": "base64..."
  *   }
  * }
+ *
+ * Display in Bubble: data:image/svg+xml;base64,{image}
  */
 router.post('/receipt', async (req, res, next) => {
   try {
@@ -977,8 +979,8 @@ router.post('/receipt', async (req, res, next) => {
       return res.status(400).json({ error: 'shipToName is required' });
     }
 
-    // Generate receipt image
-    const imageBase64 = await receiptService.generateReceipt({
+    // Generate receipt SVG
+    const result = await receiptService.generateReceipt({
       shipToName,
       shipToAddress,
       shipToCity,
@@ -994,8 +996,8 @@ router.post('/receipt', async (req, res, next) => {
     res.json({
       success: true,
       receipt: {
-        format: 'PNG',
-        image: imageBase64
+        format: 'SVG',
+        image: result.svg
       }
     });
 

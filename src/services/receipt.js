@@ -135,13 +135,13 @@ class ReceiptService {
     // Generate SVG with logo
     const svg = this.generateReceiptSVG({ ...data, logoSvg });
 
-    // Convert SVG to PNG using sharp
-    const pngBuffer = await sharp(Buffer.from(svg))
-      .png()
-      .toBuffer();
+    // Return SVG as base64 (browsers will render fonts correctly)
+    const svgBase64 = Buffer.from(svg).toString('base64');
 
-    // Return as base64
-    return pngBuffer.toString('base64');
+    return {
+      svg: svgBase64,
+      format: 'SVG'
+    };
   }
 }
 
