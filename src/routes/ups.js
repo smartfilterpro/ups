@@ -170,34 +170,61 @@ function estimateFilterWeight(length, width, depth) {
 
 /**
  * Pack filters into boxes with max 4" depth per box
+ * Uses footprint-aware best-fit packing to minimize dimensional weight:
+ * - Normalizes L/W so 16x20 and 20x16 are treated as the same footprint
+ * - Sorts by footprint area descending, then depth descending
+ * - Places each filter in the box requiring the least L×W expansion
  * Returns array of boxes with dimensions, weight, and filter IDs
  */
 function packFiltersIntoBoxes(filters) {
   const MAX_DEPTH = 4;
   const BOX_WEIGHT = 0.5; // Weight of cardboard box
 
-  // Sort filters by depth descending (best-fit decreasing)
-  const sorted = [...filters].sort((a, b) => b.depth - a.depth);
+  // Normalize dimensions so length >= width (treats 16x20 and 20x16 the same)
+  const normalized = filters.map(f => ({
+    ...f,
+    length: Math.max(f.length, f.width),
+    width: Math.min(f.length, f.width)
+  }));
+
+  // Sort by footprint area descending, then depth descending
+  // Largest footprints first so boxes are established at the right size
+  const sorted = [...normalized].sort((a, b) => {
+    const areaA = a.length * a.width;
+    const areaB = b.length * b.width;
+    if (areaB !== areaA) return areaB - areaA;
+    return b.depth - a.depth;
+  });
 
   const boxes = [];
 
   for (const filter of sorted) {
-    // Try to fit in existing box
-    let placed = false;
+    let bestBox = null;
+    let bestExpansion = Infinity;
+
     for (const box of boxes) {
-      if (box.currentDepth + filter.depth <= MAX_DEPTH) {
-        box.filters.push(filter);
-        box.currentDepth += filter.depth;
-        box.length = Math.max(box.length, filter.length);
-        box.width = Math.max(box.width, filter.width);
-        box.weight += estimateFilterWeight(filter.length, filter.width, filter.depth);
-        placed = true;
-        break;
+      if (box.currentDepth + filter.depth > MAX_DEPTH) continue;
+
+      // Calculate how much the box footprint would need to expand
+      const newLength = Math.max(box.length, filter.length);
+      const newWidth = Math.max(box.width, filter.width);
+      const expansion = (newLength * newWidth) - (box.length * box.width);
+
+      // Prefer boxes where the filter fits without expanding (expansion === 0),
+      // then boxes that expand the least
+      if (expansion < bestExpansion) {
+        bestExpansion = expansion;
+        bestBox = box;
       }
     }
 
-    // Create new box if doesn't fit
-    if (!placed) {
+    if (bestBox) {
+      bestBox.filters.push(filter);
+      bestBox.currentDepth += filter.depth;
+      bestBox.length = Math.max(bestBox.length, filter.length);
+      bestBox.width = Math.max(bestBox.width, filter.width);
+      bestBox.weight += estimateFilterWeight(filter.length, filter.width, filter.depth);
+    } else {
       boxes.push({
         filters: [filter],
         length: filter.length,
