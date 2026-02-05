@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const upsService = require('../services/ups');
+const receiptService = require('../services/receipt');
 
 // Service code reference
 const SERVICE_CODES = {
@@ -864,6 +865,83 @@ router.post('/void', async (req, res, next) => {
       totalFailed: failed.length,
       voided,
       failed
+    });
+
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
+ * POST /api/ups/receipt
+ * Generate a packing slip receipt image (4x6 thermal label size)
+ *
+ * REQUEST FORMAT:
+ * {
+ *   "shipToName": "John Doe",
+ *   "shipToAddress": "934 South Clinton Street",
+ *   "shipToCity": "Baltimore",
+ *   "shipToState": "MD",
+ *   "shipToZip": "21224",
+ *   "items": [
+ *     { "filter": "MERV 8 Standard", "qty": 2 },
+ *     { "filter": "MERV 11 Allergen", "qty": 1 }
+ *   ],
+ *   "boxNumber": 1,
+ *   "totalBoxes": 2,
+ *   "orderDate": "01/15/2024",
+ *   "orderNumber": "ORD-12345"
+ * }
+ *
+ * RESPONSE FORMAT:
+ * {
+ *   "success": true,
+ *   "receipt": {
+ *     "format": "PNG",
+ *     "image": "base64..."
+ *   }
+ * }
+ */
+router.post('/receipt', async (req, res, next) => {
+  try {
+    const {
+      shipToName,
+      shipToAddress,
+      shipToCity,
+      shipToState,
+      shipToZip,
+      items = [],
+      boxNumber,
+      totalBoxes,
+      orderDate,
+      orderNumber
+    } = req.body;
+
+    // Validate required fields
+    if (!shipToName) {
+      return res.status(400).json({ error: 'shipToName is required' });
+    }
+
+    // Generate receipt image
+    const imageBase64 = await receiptService.generateReceipt({
+      shipToName,
+      shipToAddress,
+      shipToCity,
+      shipToState,
+      shipToZip,
+      items,
+      boxNumber,
+      totalBoxes,
+      orderDate,
+      orderNumber
+    });
+
+    res.json({
+      success: true,
+      receipt: {
+        format: 'PNG',
+        image: imageBase64
+      }
     });
 
   } catch (error) {
