@@ -973,18 +973,16 @@ router.post('/void', async (req, res, next) => {
  * REQUEST FORMAT:
  * {
  *   "shipToName": "John Doe",
- *   "shipToAddress": "934 South Clinton Street, Baltimore, MD, 21224-5023",
- *   "orderDescription": "Manual Filter Purchase - My ecobee\n Filter(s) Purchased: 5\n...[li]Furnace Air Filters MERV 12 Pleated Plus Carbon (1768251602520x814374709471961600)[/li]...",
- *   "filterIds": "1768251603395x241058153015032420, 1768251602520x814374709471961600, 1768251602520x814374709471961600, 1768251600843x343682542797441500",
+ *   "orderDescription": "Manual Filter Purchase - My ecobee\n...[li]Furnace Air Filters MERV 12 Pleated Plus Carbon (1768251602520x814374709471961600)[/li]...\nShipping Address: 934 South Clinton Street, Baltimore, MD, 21224-5023",
+ *   "filterIds": "1768251603395x241058153015032420, 1768251602520x814374709471961600",
  *   "orderDate": "01/15/2024",
  *   "orderNumber": "ORD-12345"
  * }
  *
- * orderDescription: Full order text containing filter descriptions with IDs in parentheses.
- *   BBCode tags ([ul], [li], etc.) are stripped automatically.
+ * orderDescription: Full order text containing filter descriptions with IDs in parentheses,
+ *   and a "Shipping Address: Street, City, ST, ZIP" line. BBCode tags stripped automatically.
  * filterIds: Comma-separated filter IDs for this specific receipt/box.
  *   Matched against orderDescription to get descriptions. Duplicates counted for qty.
- * shipToAddress supports apartment/unit: "934 South Clinton Street, Apartment D, Baltimore, MD, 21224-5023"
  *
  * RESPONSE FORMAT:
  * {
@@ -1001,7 +999,6 @@ router.post('/receipt', async (req, res, next) => {
   try {
     const {
       shipToName,
-      shipToAddress,
       orderDescription,
       filterIds,
       orderDate,
@@ -1012,9 +1009,6 @@ router.post('/receipt', async (req, res, next) => {
     if (!shipToName) {
       return res.status(400).json({ error: 'shipToName is required' });
     }
-    if (!shipToAddress) {
-      return res.status(400).json({ error: 'shipToAddress is required' });
-    }
     if (!orderDescription) {
       return res.status(400).json({ error: 'orderDescription is required' });
     }
@@ -1022,12 +1016,22 @@ router.post('/receipt', async (req, res, next) => {
       return res.status(400).json({ error: 'filterIds is required' });
     }
 
-    // Parse the full address string
-    const parsed = parseAddress(shipToAddress);
+    // Extract shipping address from orderDescription
+    // Matches "Shipping Address: Street, City, ST, ZIP" (with optional zip+4)
+    const addressMatch = orderDescription.match(/Shipping Address:\s*(.+)/i);
+    if (!addressMatch) {
+      return res.status(400).json({
+        error: 'Could not find shipping address in orderDescription',
+        hint: 'Expected "Shipping Address: Street, City, ST, ZIP" in the order description'
+      });
+    }
+
+    const parsed = parseAddress(addressMatch[1].trim());
     if (!parsed) {
       return res.status(400).json({
-        error: 'Could not parse shipToAddress',
-        hint: 'Expected format: "Street, City, ST, ZIP" or "Street, Unit, City, ST, ZIP"'
+        error: 'Could not parse shipping address from orderDescription',
+        extractedAddress: addressMatch[1].trim(),
+        hint: 'Expected format: "Street, City, ST, ZIP"'
       });
     }
 
