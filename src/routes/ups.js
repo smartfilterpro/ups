@@ -181,8 +181,10 @@ function packFiltersIntoBoxes(filters) {
   const BOX_WEIGHT = 0.5; // Weight of cardboard box
 
   // Normalize dimensions so length >= width (treats 16x20 and 20x16 the same)
+  // Preserve original size string for filterIds output
   const normalized = filters.map(f => ({
     ...f,
+    size: `${f.length}x${f.width}x${f.depth}`,
     length: Math.max(f.length, f.width),
     width: Math.min(f.length, f.width)
   }));
@@ -243,7 +245,7 @@ function packFiltersIntoBoxes(filters) {
     height: box.currentDepth,
     filterCount: box.filters.length,
     weight: Math.round(box.weight * 10) / 10,
-    filterIds: box.filters.map(f => f.filterId).filter(id => id).join(', ')
+    filterIds: box.filters.map(f => f.filterId ? `${f.size} ${f.filterId}` : null).filter(id => id).join(', ')
   }));
 }
 
@@ -1048,10 +1050,18 @@ router.post('/receipt', async (req, res, next) => {
     }
 
     // Parse receipt filterIds and match against order
-    const receiptIds = filterIds.split(',').map(s => s.trim()).filter(s => s.length > 0);
+    // Each entry is "size filterID" (e.g. "16x20x1 1768251602520x814374709471961600")
+    const receiptEntries = filterIds.split(',').map(s => s.trim()).filter(s => s.length > 0);
+    const parsedEntries = receiptEntries.map(entry => {
+      const spaceIdx = entry.indexOf(' ');
+      if (spaceIdx > 0) {
+        return { size: entry.substring(0, spaceIdx), id: entry.substring(spaceIdx + 1) };
+      }
+      return { size: null, id: entry };
+    });
 
     // Validate all filter IDs exist in the order
-    const unknownIds = receiptIds.filter(id => !filterMap[id]);
+    const unknownIds = parsedEntries.filter(e => !filterMap[e.id]).map(e => e.id);
     if (unknownIds.length > 0) {
       return res.status(400).json({
         error: 'Filter IDs not found in order description',
@@ -1060,10 +1070,11 @@ router.post('/receipt', async (req, res, next) => {
       });
     }
 
-    // Count duplicates by description for qty
+    // Count duplicates by full description (size + name) for qty
     const counts = {};
-    for (const id of receiptIds) {
-      const desc = filterMap[id];
+    for (const entry of parsedEntries) {
+      const name = filterMap[entry.id];
+      const desc = entry.size ? `${entry.size} ${name}` : name;
       counts[desc] = (counts[desc] || 0) + 1;
     }
     const parsedItems = Object.entries(counts).map(([filter, qty]) => ({ filter, qty }));
