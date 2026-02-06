@@ -973,19 +973,18 @@ router.post('/void', async (req, res, next) => {
  * REQUEST FORMAT:
  * {
  *   "shipToName": "John Doe",
- *   "shipToAddress": "934 South Clinton Street",
- *   "shipToCity": "Baltimore",
- *   "shipToState": "MD",
- *   "shipToZip": "21224",
- *   "items": [
- *     { "filter": "MERV 8 Standard", "qty": 2 },
- *     { "filter": "MERV 11 Allergen", "qty": 1 }
- *   ],
- *   "boxNumber": 1,
- *   "totalBoxes": 2,
+ *   "shipToAddress": "934 South Clinton Street, Baltimore, MD, 21224-5023",
+ *   "orderDescription": "Manual Filter Purchase - My ecobee\n Filter(s) Purchased: 5\n...[li]Furnace Air Filters MERV 12 Pleated Plus Carbon (1768251602520x814374709471961600)[/li]...",
+ *   "filterIds": "1768251603395x241058153015032420, 1768251602520x814374709471961600, 1768251602520x814374709471961600, 1768251600843x343682542797441500",
  *   "orderDate": "01/15/2024",
  *   "orderNumber": "ORD-12345"
  * }
+ *
+ * orderDescription: Full order text containing filter descriptions with IDs in parentheses.
+ *   BBCode tags ([ul], [li], etc.) are stripped automatically.
+ * filterIds: Comma-separated filter IDs for this specific receipt/box.
+ *   Matched against orderDescription to get descriptions. Duplicates counted for qty.
+ * shipToAddress supports apartment/unit: "934 South Clinton Street, Apartment D, Baltimore, MD, 21224-5023"
  *
  * RESPONSE FORMAT:
  * {
@@ -1003,12 +1002,8 @@ router.post('/receipt', async (req, res, next) => {
     const {
       shipToName,
       shipToAddress,
-      shipToCity,
-      shipToState,
-      shipToZip,
-      items = [],
-      boxNumber,
-      totalBoxes,
+      orderDescription,
+      filterIds,
       orderDate,
       orderNumber
     } = req.body;
@@ -1017,17 +1012,66 @@ router.post('/receipt', async (req, res, next) => {
     if (!shipToName) {
       return res.status(400).json({ error: 'shipToName is required' });
     }
+    if (!shipToAddress) {
+      return res.status(400).json({ error: 'shipToAddress is required' });
+    }
+    if (!orderDescription) {
+      return res.status(400).json({ error: 'orderDescription is required' });
+    }
+    if (!filterIds) {
+      return res.status(400).json({ error: 'filterIds is required' });
+    }
+
+    // Parse the full address string
+    const parsed = parseAddress(shipToAddress);
+    if (!parsed) {
+      return res.status(400).json({
+        error: 'Could not parse shipToAddress',
+        hint: 'Expected format: "Street, City, ST, ZIP" or "Street, Unit, City, ST, ZIP"'
+      });
+    }
+
+    // Parse orderDescription to build filter ID → description map
+    // Strip BBCode tags and match "Description (filterID)" patterns
+    const cleanText = orderDescription.replace(/\[\/?(?:ul|li|ol|b|i)\]/gi, '');
+    const filterMap = {};
+    const filterPattern = /([^(\n]+?)\s*\((\d+x\d+)\)/g;
+    let match;
+    while ((match = filterPattern.exec(cleanText)) !== null) {
+      const description = match[1].trim();
+      const filterId = match[2];
+      filterMap[filterId] = description;
+    }
+
+    // Parse receipt filterIds and match against order
+    const receiptIds = filterIds.split(',').map(s => s.trim()).filter(s => s.length > 0);
+
+    // Validate all filter IDs exist in the order
+    const unknownIds = receiptIds.filter(id => !filterMap[id]);
+    if (unknownIds.length > 0) {
+      return res.status(400).json({
+        error: 'Filter IDs not found in order description',
+        unknownIds,
+        hint: 'Each filterIds entry must match a (filterID) in the orderDescription'
+      });
+    }
+
+    // Count duplicates by description for qty
+    const counts = {};
+    for (const id of receiptIds) {
+      const desc = filterMap[id];
+      counts[desc] = (counts[desc] || 0) + 1;
+    }
+    const parsedItems = Object.entries(counts).map(([filter, qty]) => ({ filter, qty }));
 
     // Generate receipt SVG
     const result = await receiptService.generateReceipt({
       shipToName,
-      shipToAddress,
-      shipToCity,
-      shipToState,
-      shipToZip,
-      items,
-      boxNumber,
-      totalBoxes,
+      shipToAddress: parsed.street,
+      shipToCity: parsed.city,
+      shipToState: parsed.state,
+      shipToZip: parsed.postalCode,
+      items: parsedItems,
       orderDate,
       orderNumber
     });

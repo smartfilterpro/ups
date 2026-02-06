@@ -51,8 +51,6 @@ class ReceiptService {
       shipToState,
       shipToZip,
       items = [],
-      boxNumber,
-      totalBoxes,
       orderDate,
       orderNumber,
       logoSvg
@@ -61,6 +59,22 @@ class ReceiptService {
     // 6x4 inches LANDSCAPE orientation (matching shipping label)
     const width = 600;
     const height = 400;
+
+    // Split street address if it contains an apartment/unit (e.g., "934 South Clinton Street, Apartment D")
+    const addressParts = (shipToAddress || '').split(',').map(s => s.trim()).filter(s => s);
+    const streetLine1 = addressParts[0] || '';
+    const streetLine2 = addressParts.length > 1 ? addressParts.slice(1).join(', ') : '';
+    const cityStateZip = `${escapeXml(shipToCity || '')}${shipToCity && shipToState ? ', ' : ''}${escapeXml(shipToState || '')} ${escapeXml(shipToZip || '')}`;
+
+    // Build address lines, shifting down if there's a second street line
+    const addressLines = [];
+    addressLines.push(`<text x="20" y="145" font-family="DejaVu Sans, Liberation Sans, sans-serif" font-size="14" fill="#000">${escapeXml(streetLine1)}</text>`);
+    let nextY = 165;
+    if (streetLine2) {
+      addressLines.push(`<text x="20" y="${nextY}" font-family="DejaVu Sans, Liberation Sans, sans-serif" font-size="14" fill="#000">${escapeXml(streetLine2)}</text>`);
+      nextY += 20;
+    }
+    addressLines.push(`<text x="20" y="${nextY}" font-family="DejaVu Sans, Liberation Sans, sans-serif" font-size="14" fill="#000">${cityStateZip}</text>`);
 
     // Build items list (smaller font, tighter spacing for landscape)
     const itemLines = items.map((item, index) => {
@@ -72,11 +86,6 @@ class ReceiptService {
 
     // Calculate total quantity
     const totalQty = items.reduce((sum, item) => sum + (item.qty || 1), 0);
-
-    // Box info
-    const boxInfo = (boxNumber && totalBoxes)
-      ? `Box ${boxNumber} of ${totalBoxes}`
-      : '';
 
     // Logo section - embed SVG or use text fallback
     let logoSection;
@@ -111,8 +120,7 @@ class ReceiptService {
 
   <text x="20" y="105" font-family="DejaVu Sans, Liberation Sans, sans-serif" font-size="12" font-weight="bold" fill="#000">SHIP TO:</text>
   <text x="20" y="125" font-family="DejaVu Sans, Liberation Sans, sans-serif" font-size="16" font-weight="bold" fill="#000">${escapeXml(shipToName || '')}</text>
-  <text x="20" y="145" font-family="DejaVu Sans, Liberation Sans, sans-serif" font-size="14" fill="#000">${escapeXml(shipToAddress || '')}</text>
-  <text x="20" y="165" font-family="DejaVu Sans, Liberation Sans, sans-serif" font-size="14" fill="#000">${escapeXml(shipToCity || '')}${shipToCity && shipToState ? ', ' : ''}${escapeXml(shipToState || '')} ${escapeXml(shipToZip || '')}</text>
+  ${addressLines.join('\n  ')}
 
   <line x1="300" y1="95" x2="300" y2="300" stroke="#000" stroke-width="1"/>
 
@@ -124,7 +132,6 @@ class ReceiptService {
   ${orderNumber ? `<text x="20" y="330" font-family="DejaVu Sans, Liberation Sans, sans-serif" font-size="12" font-weight="bold" fill="#000">Order: <tspan font-weight="bold" fill="#000">${escapeXml(orderNumber)}</tspan></text>` : ''}
   ${orderDate ? `<text x="150" y="330" font-family="DejaVu Sans, Liberation Sans, sans-serif" font-size="12" font-weight="bold" fill="#000">Date: <tspan fill="#000">${escapeXml(orderDate)}</tspan></text>` : ''}
   <text x="320" y="330" font-family="DejaVu Sans, Liberation Sans, sans-serif" font-size="14" font-weight="bold" fill="#000">Total Filters: <tspan font-weight="bold">${totalQty}</tspan></text>
-  ${boxInfo ? `<text x="480" y="330" font-family="DejaVu Sans, Liberation Sans, sans-serif" font-size="14" font-weight="bold" fill="#000">${escapeXml(boxInfo)}</text>` : ''}
 
   <text x="300" y="370" font-family="DejaVu Sans, Liberation Sans, sans-serif" font-size="12" fill="#000" text-anchor="middle">Thank you for your order!</text>
 </svg>`;
