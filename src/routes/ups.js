@@ -973,10 +973,7 @@ router.post('/void', async (req, res, next) => {
  * REQUEST FORMAT:
  * {
  *   "shipToName": "John Doe",
- *   "shipToAddress": "934 South Clinton Street",
- *   "shipToCity": "Baltimore",
- *   "shipToState": "MD",
- *   "shipToZip": "21224",
+ *   "shipToAddress": "934 South Clinton Street, Baltimore, MD, 21224-5023",
  *   "items": [
  *     { "filter": "MERV 8 Standard", "qty": 2 },
  *     { "filter": "MERV 11 Allergen", "qty": 1 }
@@ -986,6 +983,8 @@ router.post('/void', async (req, res, next) => {
  *   "orderDate": "01/15/2024",
  *   "orderNumber": "ORD-12345"
  * }
+ *
+ * shipToAddress supports apartment/unit: "934 South Clinton Street, Apartment D, Baltimore, MD, 21224-5023"
  *
  * RESPONSE FORMAT:
  * {
@@ -1003,9 +1002,6 @@ router.post('/receipt', async (req, res, next) => {
     const {
       shipToName,
       shipToAddress,
-      shipToCity,
-      shipToState,
-      shipToZip,
       items = [],
       boxNumber,
       totalBoxes,
@@ -1017,14 +1013,28 @@ router.post('/receipt', async (req, res, next) => {
     if (!shipToName) {
       return res.status(400).json({ error: 'shipToName is required' });
     }
+    if (!shipToAddress) {
+      return res.status(400).json({ error: 'shipToAddress is required' });
+    }
+
+    // Parse the full address string
+    // Supports: "934 South Clinton Street, Baltimore, MD, 21224-5023"
+    //       or: "934 South Clinton Street, Apartment D, Baltimore, MD, 21224-5023"
+    const parsed = parseAddress(shipToAddress);
+    if (!parsed) {
+      return res.status(400).json({
+        error: 'Could not parse shipToAddress',
+        hint: 'Expected format: "Street, City, ST, ZIP" or "Street, Unit, City, ST, ZIP"'
+      });
+    }
 
     // Generate receipt SVG
     const result = await receiptService.generateReceipt({
       shipToName,
-      shipToAddress,
-      shipToCity,
-      shipToState,
-      shipToZip,
+      shipToAddress: parsed.street,
+      shipToCity: parsed.city,
+      shipToState: parsed.state,
+      shipToZip: parsed.postalCode,
       items,
       boxNumber,
       totalBoxes,
