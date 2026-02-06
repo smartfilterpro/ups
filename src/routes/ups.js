@@ -974,12 +974,12 @@ router.post('/void', async (req, res, next) => {
  * {
  *   "shipToName": "John Doe",
  *   "shipToAddress": "934 South Clinton Street, Baltimore, MD, 21224-5023",
- *   "items": "16x20x4 (3 5/8) Pleated Air Filters MERV 7 Plus Carbon;;16x20x4 (3 5/8) Pleated Air Filters MERV 7 Plus Carbon;;12x24x1 Pleated Air Filters MERV 8",
+ *   "items": "16x20x4 (3 5/8) Pleated Air Filters MERV 7 Plus Carbon,16x20x4 (3 5/8) Pleated Air Filters MERV 7 Plus Carbon,12x24x1 Pleated Air Filters MERV 8",
  *   "orderDate": "01/15/2024",
  *   "orderNumber": "ORD-12345"
  * }
  *
- * items: ";;" delimited string of filter descriptions. Duplicates are counted automatically for qty.
+ * items: comma delimited string of filter descriptions. Duplicates are counted automatically for qty.
  * shipToAddress supports apartment/unit: "934 South Clinton Street, Apartment D, Baltimore, MD, 21224-5023"
  *
  * RESPONSE FORMAT:
@@ -1022,11 +1022,11 @@ router.post('/receipt', async (req, res, next) => {
       });
     }
 
-    // Parse items string: ";;" delimited filter descriptions, count duplicates for qty
+    // Parse items string: comma delimited filter descriptions, count duplicates for qty
     let parsedItems = [];
     if (items && typeof items === 'string' && items.trim() !== '') {
       const counts = {};
-      const descriptions = items.split(';;').map(s => s.trim()).filter(s => s.length > 0);
+      const descriptions = items.split(',').map(s => s.trim()).filter(s => s.length > 0);
       for (const desc of descriptions) {
         counts[desc] = (counts[desc] || 0) + 1;
       }
