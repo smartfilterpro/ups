@@ -76,12 +76,12 @@ class ReceiptService {
     }
     addressLines.push(`<text x="20" y="${nextY}" font-family="DejaVu Sans, Liberation Sans, sans-serif" font-size="14" fill="#000">${cityStateZip}</text>`);
 
-    // Build items list (smaller font, tighter spacing for landscape)
+    // Build items list (compact font to fit within items column)
     const itemLines = items.map((item, index) => {
-      const y = 195 + (index * 22);
+      const y = 125 + (index * 18);
       const qty = item.qty || 1;
       const filter = item.filter || item.Filter || 'Filter';
-      return `<text x="320" y="${y}" font-family="DejaVu Sans, Liberation Sans, sans-serif" font-size="14" fill="#000">(${qty}) ${escapeXml(filter)}</text>`;
+      return `<text x="320" y="${y}" font-family="DejaVu Sans, Liberation Sans, sans-serif" font-size="10" fill="#000">(${qty}) ${escapeXml(filter)}</text>`;
     }).join('\n    ');
 
     // Calculate total quantity
