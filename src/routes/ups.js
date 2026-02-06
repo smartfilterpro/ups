@@ -974,16 +974,12 @@ router.post('/void', async (req, res, next) => {
  * {
  *   "shipToName": "John Doe",
  *   "shipToAddress": "934 South Clinton Street, Baltimore, MD, 21224-5023",
- *   "items": [
- *     { "filter": "MERV 8 Standard", "qty": 2 },
- *     { "filter": "MERV 11 Allergen", "qty": 1 }
- *   ],
- *   "boxNumber": 1,
- *   "totalBoxes": 2,
+ *   "items": "16x20x4 (3 5/8) Pleated Air Filters MERV 7 Plus Carbon;;16x20x4 (3 5/8) Pleated Air Filters MERV 7 Plus Carbon;;12x24x1 Pleated Air Filters MERV 8",
  *   "orderDate": "01/15/2024",
  *   "orderNumber": "ORD-12345"
  * }
  *
+ * items: ";;" delimited string of filter descriptions. Duplicates are counted automatically for qty.
  * shipToAddress supports apartment/unit: "934 South Clinton Street, Apartment D, Baltimore, MD, 21224-5023"
  *
  * RESPONSE FORMAT:
@@ -1002,9 +998,7 @@ router.post('/receipt', async (req, res, next) => {
     const {
       shipToName,
       shipToAddress,
-      items = [],
-      boxNumber,
-      totalBoxes,
+      items,
       orderDate,
       orderNumber
     } = req.body;
@@ -1028,6 +1022,17 @@ router.post('/receipt', async (req, res, next) => {
       });
     }
 
+    // Parse items string: ";;" delimited filter descriptions, count duplicates for qty
+    let parsedItems = [];
+    if (items && typeof items === 'string' && items.trim() !== '') {
+      const counts = {};
+      const descriptions = items.split(';;').map(s => s.trim()).filter(s => s.length > 0);
+      for (const desc of descriptions) {
+        counts[desc] = (counts[desc] || 0) + 1;
+      }
+      parsedItems = Object.entries(counts).map(([filter, qty]) => ({ filter, qty }));
+    }
+
     // Generate receipt SVG
     const result = await receiptService.generateReceipt({
       shipToName,
@@ -1035,9 +1040,7 @@ router.post('/receipt', async (req, res, next) => {
       shipToCity: parsed.city,
       shipToState: parsed.state,
       shipToZip: parsed.postalCode,
-      items,
-      boxNumber,
-      totalBoxes,
+      items: parsedItems,
       orderDate,
       orderNumber
     });

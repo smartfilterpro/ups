@@ -51,8 +51,6 @@ class ReceiptService {
       shipToState,
       shipToZip,
       items = [],
-      boxNumber,
-      totalBoxes,
       orderDate,
       orderNumber,
       logoSvg
@@ -88,11 +86,6 @@ class ReceiptService {
 
     // Calculate total quantity
     const totalQty = items.reduce((sum, item) => sum + (item.qty || 1), 0);
-
-    // Box info
-    const boxInfo = (boxNumber && totalBoxes)
-      ? `Box ${boxNumber} of ${totalBoxes}`
-      : '';
 
     // Logo section - embed SVG or use text fallback
     let logoSection;
@@ -139,7 +132,6 @@ class ReceiptService {
   ${orderNumber ? `<text x="20" y="330" font-family="DejaVu Sans, Liberation Sans, sans-serif" font-size="12" font-weight="bold" fill="#000">Order: <tspan font-weight="bold" fill="#000">${escapeXml(orderNumber)}</tspan></text>` : ''}
   ${orderDate ? `<text x="150" y="330" font-family="DejaVu Sans, Liberation Sans, sans-serif" font-size="12" font-weight="bold" fill="#000">Date: <tspan fill="#000">${escapeXml(orderDate)}</tspan></text>` : ''}
   <text x="320" y="330" font-family="DejaVu Sans, Liberation Sans, sans-serif" font-size="14" font-weight="bold" fill="#000">Total Filters: <tspan font-weight="bold">${totalQty}</tspan></text>
-  ${boxInfo ? `<text x="480" y="330" font-family="DejaVu Sans, Liberation Sans, sans-serif" font-size="14" font-weight="bold" fill="#000">${escapeXml(boxInfo)}</text>` : ''}
 
   <text x="300" y="370" font-family="DejaVu Sans, Liberation Sans, sans-serif" font-size="12" fill="#000" text-anchor="middle">Thank you for your order!</text>
 </svg>`;
