@@ -1,4 +1,5 @@
 const upsService = require('./ups');
+const bubbleService = require('./bubbleService');
 const shipmentsDb = require('../db/shipments');
 const trackingEventsDb = require('../db/trackingEvents');
 
@@ -18,11 +19,13 @@ async function pollAllShipments() {
 
     let updated = 0;
     let errors = 0;
+    let bubbleNotified = 0;
 
     for (const shipment of activeShipments) {
       try {
-        await pollSingleShipment(shipment);
+        const result = await pollSingleShipment(shipment);
         updated++;
+        if (result?.bubbleNotified) bubbleNotified++;
       } catch (err) {
         errors++;
         console.error(`[tracking] Error polling ${shipment.tracking_number}:`, err.message);
@@ -35,7 +38,7 @@ async function pollAllShipments() {
     }
 
     const duration = Date.now() - startTime;
-    console.log(`[tracking] Poll complete: ${updated} updated, ${errors} errors, ${duration}ms`);
+    console.log(`[tracking] Poll complete: ${updated} updated, ${bubbleNotified} notified to Bubble, ${errors} errors, ${duration}ms`);
   } catch (err) {
     console.error('[tracking] Poll failed:', err.message);
   }
@@ -100,6 +103,8 @@ async function pollSingleShipment(shipment) {
 
   // Map UPS status types to our status
   const newStatus = mapUpsStatus(latestStatusType, latestStatusCode);
+  let bubbleNotified = false;
+
   if (newStatus && newStatus !== shipment.status) {
     const extra = {};
     if (newStatus === 'delivered') {
@@ -107,7 +112,33 @@ async function pollSingleShipment(shipment) {
     }
     await shipmentsDb.updateShipmentStatus(shipment.tracking_number, newStatus, extra);
     console.log(`[tracking] ${shipment.tracking_number}: ${shipment.status} -> ${newStatus}`);
+
+    // Notify Bubble of the status change
+    const latestActivity = activities[0];
+    const latestEvent = latestActivity ? {
+      description: latestActivity.status?.description,
+      locationCity: latestActivity.location?.address?.city,
+      locationState: latestActivity.location?.address?.stateProvince,
+      locationCountry: latestActivity.location?.address?.country,
+      activityTimestamp: (() => {
+        const d = latestActivity.date;
+        const t = latestActivity.time;
+        if (!d) return null;
+        const dateStr = `${d.slice(0, 4)}-${d.slice(4, 6)}-${d.slice(6, 8)}`;
+        const timeStr = t ? `${t.slice(0, 2)}:${t.slice(2, 4)}:${t.slice(4, 6)}` : '00:00:00';
+        return new Date(`${dateStr}T${timeStr}Z`);
+      })(),
+    } : null;
+
+    try {
+      const bubbleResult = await bubbleService.postTrackingUpdate(shipment, newStatus, latestEvent);
+      bubbleNotified = bubbleResult.success;
+    } catch (err) {
+      console.error(`[tracking] Bubble notification failed for ${shipment.tracking_number}:`, err.message);
+    }
   }
+
+  return { bubbleNotified };
 }
 
 /**

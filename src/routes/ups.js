@@ -689,7 +689,13 @@ router.get('/debug', (req, res) => {
     baseUrl: baseUrl,
     accountNumber: process.env.UPS_ACCOUNT_NUMBER ? '***' + process.env.UPS_ACCOUNT_NUMBER.slice(-4) : 'NOT SET',
     clientIdSet: !!process.env.UPS_CLIENT_ID,
-    clientSecretSet: !!process.env.UPS_CLIENT_SECRET
+    clientSecretSet: !!process.env.UPS_CLIENT_SECRET,
+    bubble: {
+      configured: !!(process.env.BUBBLE_API_URL && process.env.BUBBLE_API_KEY),
+      apiUrl: process.env.BUBBLE_API_URL || 'NOT SET',
+      webhookPath: process.env.BUBBLE_WEBHOOK_PATH || 'tracking-update',
+      apiKeySet: !!process.env.BUBBLE_API_KEY,
+    },
   });
 });
 
