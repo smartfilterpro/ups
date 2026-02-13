@@ -14,10 +14,12 @@ app.use(express.json());
 
 // Health check
 app.get('/health', (req, res) => {
+  const bubbleService = require('./services/bubbleService');
   res.json({
     status: 'ok',
     timestamp: new Date().toISOString(),
     database: db.isConfigured() ? 'connected' : 'not configured',
+    bubble: bubbleService.isConfigured() ? 'configured' : 'not configured',
   });
 });
 
