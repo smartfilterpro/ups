@@ -361,7 +361,7 @@ function splitAddresses(addressesStr) {
  * When number restarts at (1) or HVAC ID changes, it's a new address group
  */
 function parseFilters(filtersStr) {
-  const filterParts = filtersStr.split(/,\s*(?=\(\d+\))/);
+  const filterParts = filtersStr.split(';;').map(s => s.trim()).filter(s => s.length > 0);
   const groups = [];
   let currentGroup = [];
   let lastNumber = 0;
@@ -1102,7 +1102,7 @@ router.post('/void', async (req, res, next) => {
  * {
  *   "shipToName": "John Doe",
  *   "orderDescription": "Manual Filter Purchase - My ecobee\n...[li]Furnace Air Filters MERV 12 Pleated Plus Carbon (1768251602520x814374709471961600)[/li]...",
- *   "filterIds": "(1)1768251601046x907810592323898600 - HVAC ID: 440768184491 - Address: 934 South 18th Street, Newark, NJ, 07108 - size: 12x24x1 - price: 27.5, (2)1768251604537x852000607979430700 - HVAC ID: 440768184491 - Address: 555 Other St, City, NY, 10001 - size: 16x30x1 - price: 29.3",
+ *   "filterIds": "(1)1768251601046x907810592323898600 - HVAC ID: 440768184491 - Address: 934 South 18th Street, Newark, NJ, 07108 - size: 12x24x1 - price: 27.5;;(2)1768251604537x852000607979430700 - HVAC ID: 440768184491 - Address: 555 Other St, City, NY, 10001 - size: 16x30x1 - price: 29.3",
  *   "orderDate": "01/15/2024",
  *   "orderNumber": "ORD-12345"
  * }
@@ -1112,7 +1112,7 @@ router.post('/void', async (req, res, next) => {
  *   BBCode tags stripped automatically. Used to map filter IDs to product names.
  * filterIds: Indexed filter entries with embedded address, size, and price.
  *   Format per entry: "(N)FilterID - HVAC ID: xxx - Address: Street, City, ST, ZIP - size: LxWxH - price: N.N"
- *   Entries separated by ", " before the next "(N)".
+ *   Entries separated by ";;".
  *   Filters are grouped by address — one receipt generated per unique address.
  *   Duplicate filters (same size + product name) at the same address are counted for qty.
  *
@@ -1166,7 +1166,7 @@ router.post('/receipt', async (req, res, next) => {
     // Parse filterIds - new format:
     // "(1)FilterID - HVAC ID: xxx - Address: Street, City, ST, ZIP - size: LxWxH - price: N.N"
     // Split on ", " before "(N)" — safe because address commas never precede "("
-    const filterEntries = filterIds.split(/,\s*(?=\(\d+\))/).map(s => s.trim()).filter(s => s.length > 0);
+    const filterEntries = filterIds.split(';;').map(s => s.trim()).filter(s => s.length > 0);
 
     const parsedEntries = [];
     for (const entry of filterEntries) {
