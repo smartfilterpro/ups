@@ -1095,32 +1095,40 @@ router.post('/void', async (req, res, next) => {
 
 /**
  * POST /api/ups/receipt
- * Generate a packing slip receipt image (4x6 thermal label size)
+ * Generate packing slip receipt image(s) (4x6 thermal label size)
+ * Automatically groups filters by address and returns one receipt per address.
  *
  * REQUEST FORMAT:
  * {
  *   "shipToName": "John Doe",
- *   "orderDescription": "Manual Filter Purchase - My ecobee\n...[li]Furnace Air Filters MERV 12 Pleated Plus Carbon (1768251602520x814374709471961600)[/li]...\nShipping Address: 934 South Clinton Street, Baltimore, MD, 21224-5023",
- *   "filterIds": "1768251603395x241058153015032420, 1768251602520x814374709471961600",
+ *   "orderDescription": "Manual Filter Purchase - My ecobee\n...[li]Furnace Air Filters MERV 12 Pleated Plus Carbon (1768251602520x814374709471961600)[/li]...",
+ *   "filterIds": "(1)1768251601046x907810592323898600 - HVAC ID: 440768184491 - Address: 934 South 18th Street, Newark, NJ, 07108 - size: 12x24x1 - price: 27.5, (2)1768251604537x852000607979430700 - HVAC ID: 440768184491 - Address: 555 Other St, City, NY, 10001 - size: 16x30x1 - price: 29.3",
  *   "orderDate": "01/15/2024",
  *   "orderNumber": "ORD-12345"
  * }
  *
- * orderDescription: Full order text containing filter descriptions with IDs in parentheses,
- *   and a "Shipping Address: Street, City, ST, ZIP" line. BBCode tags stripped automatically.
- * filterIds: Comma-separated filter IDs for this specific receipt/box.
- *   Matched against orderDescription to get descriptions. Duplicates counted for qty.
+ * shipToName: Customer name displayed on all receipts.
+ * orderDescription: Full order text containing filter descriptions with IDs in parentheses.
+ *   BBCode tags stripped automatically. Used to map filter IDs to product names.
+ * filterIds: Indexed filter entries with embedded address, size, and price.
+ *   Format per entry: "(N)FilterID - HVAC ID: xxx - Address: Street, City, ST, ZIP - size: LxWxH - price: N.N"
+ *   Entries separated by ", " before the next "(N)".
+ *   Filters are grouped by address — one receipt generated per unique address.
+ *   Duplicate filters (same size + product name) at the same address are counted for qty.
  *
  * RESPONSE FORMAT:
  * {
  *   "success": true,
- *   "receipt": {
- *     "format": "SVG",
- *     "image": "base64..."
- *   }
+ *   "receipts": [
+ *     {
+ *       "address": "934 South 18th Street, Newark, NJ, 07108",
+ *       "format": "SVG",
+ *       "image": "base64..."
+ *     }
+ *   ]
  * }
  *
- * Display in Bubble: data:image/svg+xml;base64,{image}
+ * Display in Bubble: data:image/svg+xml;base64,{image} (loop through receipts array)
  */
 router.post('/receipt', async (req, res, next) => {
   try {
@@ -1143,25 +1151,6 @@ router.post('/receipt', async (req, res, next) => {
       return res.status(400).json({ error: 'filterIds is required' });
     }
 
-    // Extract shipping address from orderDescription
-    // Matches "Shipping Address: Street, City, ST, ZIP" (with optional zip+4)
-    const addressMatch = orderDescription.match(/Shipping Address:\s*(.+)/i);
-    if (!addressMatch) {
-      return res.status(400).json({
-        error: 'Could not find shipping address in orderDescription',
-        hint: 'Expected "Shipping Address: Street, City, ST, ZIP" in the order description'
-      });
-    }
-
-    const parsed = parseAddress(addressMatch[1].trim());
-    if (!parsed) {
-      return res.status(400).json({
-        error: 'Could not parse shipping address from orderDescription',
-        extractedAddress: addressMatch[1].trim(),
-        hint: 'Expected format: "Street, City, ST, ZIP"'
-      });
-    }
-
     // Parse orderDescription to build filter ID → description map
     // Strip BBCode tags and match "Description (filterID)" patterns
     const cleanText = orderDescription.replace(/\[\/?(?:ul|li|ol|b|i)\]/gi, '');
@@ -1174,54 +1163,87 @@ router.post('/receipt', async (req, res, next) => {
       filterMap[filterId] = description;
     }
 
-    // Parse receipt filterIds and match against order
-    // Each entry is "size filterID" (e.g. "16x20x1 1768251602520x814374709471961600")
-    const receiptEntries = filterIds.split(',').map(s => s.trim()).filter(s => s.length > 0);
-    const parsedEntries = receiptEntries.map(entry => {
-      const spaceIdx = entry.indexOf(' ');
-      if (spaceIdx > 0) {
-        return { size: entry.substring(0, spaceIdx), id: entry.substring(spaceIdx + 1) };
-      }
-      return { size: null, id: entry };
-    });
+    // Parse filterIds - new format:
+    // "(1)FilterID - HVAC ID: xxx - Address: Street, City, ST, ZIP - size: LxWxH - price: N.N"
+    // Split on ", " before "(N)" — safe because address commas never precede "("
+    const filterEntries = filterIds.split(/,\s*(?=\(\d+\))/).map(s => s.trim()).filter(s => s.length > 0);
 
-    // Validate all filter IDs exist in the order
-    const unknownIds = parsedEntries.filter(e => !filterMap[e.id]).map(e => e.id);
-    if (unknownIds.length > 0) {
-      return res.status(400).json({
-        error: 'Filter IDs not found in order description',
-        unknownIds,
-        hint: 'Each filterIds entry must match a (filterID) in the orderDescription'
+    const parsedEntries = [];
+    for (const entry of filterEntries) {
+      const filterIdMatch = entry.match(/^\s*\(\d+\)\s*([^\s-]+)/);
+      const addressMatch = entry.match(/- Address:\s*(.+?)\s*- size:/i);
+      const sizeMatch = entry.match(/- size:\s*(\d+x\d+x\d+)/i);
+      const priceMatch = entry.match(/- price:\s*([\d.]+)/i);
+
+      if (!filterIdMatch || !addressMatch || !sizeMatch) {
+        return res.status(400).json({
+          error: 'Could not parse filter entry',
+          entry,
+          hint: 'Expected format: "(N)FilterID - HVAC ID: xxx - Address: Street, City, ST, ZIP - size: LxWxH - price: N.N"'
+        });
+      }
+
+      parsedEntries.push({
+        filterId: filterIdMatch[1].trim(),
+        address: addressMatch[1].trim(),
+        size: sizeMatch[1],
+        price: priceMatch ? parseFloat(priceMatch[1]) : null
       });
     }
 
-    // Count duplicates by full description (size + name) for qty
-    const counts = {};
+    // Group filters by address — one receipt per unique address
+    const byAddress = {};
     for (const entry of parsedEntries) {
-      const name = filterMap[entry.id];
-      const desc = entry.size ? `${entry.size} ${name}` : name;
-      counts[desc] = (counts[desc] || 0) + 1;
+      if (!byAddress[entry.address]) {
+        byAddress[entry.address] = [];
+      }
+      byAddress[entry.address].push(entry);
     }
-    const parsedItems = Object.entries(counts).map(([filter, qty]) => ({ filter, qty }));
 
-    // Generate receipt SVG
-    const result = await receiptService.generateReceipt({
-      shipToName,
-      shipToAddress: parsed.street,
-      shipToCity: parsed.city,
-      shipToState: parsed.state,
-      shipToZip: parsed.postalCode,
-      items: parsedItems,
-      orderDate,
-      orderNumber
-    });
+    // Generate one receipt per address
+    const receipts = [];
+
+    for (const [addressRaw, entries] of Object.entries(byAddress)) {
+      const parsed = parseAddress(addressRaw);
+      if (!parsed) {
+        return res.status(400).json({
+          error: 'Could not parse shipping address',
+          address: addressRaw,
+          hint: 'Expected format: "Street, City, ST, ZIP"'
+        });
+      }
+
+      // Count duplicates by size + filter name for qty
+      const counts = {};
+      for (const entry of entries) {
+        const name = filterMap[entry.filterId] || 'Filter';
+        const desc = `${entry.size} ${name}`;
+        counts[desc] = (counts[desc] || 0) + 1;
+      }
+      const items = Object.entries(counts).map(([filter, qty]) => ({ filter, qty }));
+
+      // Generate receipt SVG
+      const result = await receiptService.generateReceipt({
+        shipToName,
+        shipToAddress: parsed.street,
+        shipToCity: parsed.city,
+        shipToState: parsed.state,
+        shipToZip: parsed.postalCode,
+        items,
+        orderDate,
+        orderNumber
+      });
+
+      receipts.push({
+        address: addressRaw,
+        format: 'SVG',
+        image: result.svg
+      });
+    }
 
     res.json({
       success: true,
-      receipt: {
-        format: 'SVG',
-        image: result.svg
-      }
+      receipts
     });
 
   } catch (error) {
