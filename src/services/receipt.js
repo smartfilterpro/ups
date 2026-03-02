@@ -1,11 +1,16 @@
 const sharp = require('sharp');
+const QRCode = require('qrcode');
 
 // Logo URL - can be overridden with LOGO_URL environment variable
 const DEFAULT_LOGO_URL = 'https://51568b615cebbb736b16194a197c101f.cdn.bubble.io/f1722603581863x952206576004489300/Logo.svg';
 
+// QR code destination URL
+const FILTER_RESET_URL = 'https://app.smartfilterpro.com/filter-reset';
+
 class ReceiptService {
   constructor() {
     this.logoCache = null;
+    this.qrCache = null;
   }
 
   // Convert all colors in SVG to black for thermal printing
@@ -19,6 +24,30 @@ class ReceiptService {
       .replace(/fill:\s*(?!none)[^;}"']+/gi, 'fill:#000')
       // Replace stroke in style attributes
       .replace(/stroke:\s*(?!none)[^;}"']+/gi, 'stroke:#000');
+  }
+
+  async generateQRCode() {
+    if (this.qrCache) {
+      return this.qrCache;
+    }
+
+    try {
+      const svgString = await QRCode.toString(FILTER_RESET_URL, {
+        type: 'svg',
+        margin: 0,
+        color: { dark: '#000', light: '#fff' }
+      });
+      // Extract just the inner SVG content (paths) without the outer <svg> wrapper
+      const innerContent = svgString
+        .replace(/<\?xml[^?]*\?>/g, '')
+        .replace(/<svg[^>]*>/, '')
+        .replace(/<\/svg>/, '');
+      this.qrCache = innerContent;
+      return this.qrCache;
+    } catch (error) {
+      console.error('Failed to generate QR code:', error.message);
+      return null;
+    }
   }
 
   async fetchLogo() {
@@ -53,7 +82,8 @@ class ReceiptService {
       items = [],
       orderDate,
       orderNumber,
-      logoSvg
+      logoSvg,
+      qrSvg
     } = data;
 
     // 6x4 inches LANDSCAPE orientation (matching shipping label)
@@ -107,12 +137,27 @@ class ReceiptService {
       `;
     }
 
+    // QR code section - top right corner
+    // QR viewBox is 33x33; scale(2.0) makes it ~66x66px
+    let qrSection = '';
+    if (qrSvg) {
+      qrSection = `
+        <g transform="translate(514, 10) scale(2.0)">
+          ${qrSvg}
+        </g>
+        <text x="547" y="82" font-family="DejaVu Sans, Liberation Sans, sans-serif" font-size="7" fill="#000" text-anchor="middle">Scan QR code to</text>
+        <text x="547" y="90" font-family="DejaVu Sans, Liberation Sans, sans-serif" font-size="7" fill="#000" text-anchor="middle">reset your filter</text>
+      `;
+    }
+
     const svg = `<?xml version="1.0" encoding="UTF-8"?>
 <svg width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg">
   <rect width="100%" height="100%" fill="white"/>
   <rect x="5" y="5" width="${width - 10}" height="${height - 10}" fill="none" stroke="#000" stroke-width="2"/>
 
   ${logoSection}
+
+  ${qrSection}
 
   <text x="200" y="50" font-family="DejaVu Sans, Liberation Sans, sans-serif" font-size="20" font-weight="bold" fill="#000">PACKING SLIP</text>
 
@@ -140,8 +185,11 @@ class ReceiptService {
   }
 
   async generateReceipt(data) {
-    const logoSvg = await this.fetchLogo();
-    const svg = this.generateReceiptSVG({ ...data, logoSvg });
+    const [logoSvg, qrSvg] = await Promise.all([
+      this.fetchLogo(),
+      this.generateQRCode()
+    ]);
+    const svg = this.generateReceiptSVG({ ...data, logoSvg, qrSvg });
     const svgBase64 = Buffer.from(svg).toString('base64');
 
     return {
