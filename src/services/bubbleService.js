@@ -91,4 +91,55 @@ async function postTrackingUpdate(shipment, newStatus, latestEvent) {
   }
 }
 
-module.exports = { isConfigured, postTrackingUpdate };
+/**
+ * Post a user notification to Bubble.
+ * Creates a notification in the user's inbox that appears in the React app.
+ *
+ * @param {string} userId - The Bubble user ID
+ * @param {string} message - The notification message text
+ * @returns {object} - { success, statusCode, body } or { success: false, error }
+ */
+async function postUserNotification(userId, message) {
+  if (!isConfigured()) {
+    console.log('[bubble] Not configured — skipping notification');
+    return { success: false, error: 'Bubble not configured' };
+  }
+
+  const url = `${BUBBLE_API_URL().replace(/\/+$/, '')}/messages`;
+
+  const payload = {
+    UserID: userId,
+    MessagePost: message
+  };
+
+  try {
+    console.log(`[bubble] Posting notification to user ${userId}: ${message}`);
+
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${BUBBLE_API_KEY()}`,
+      },
+      body: JSON.stringify(payload),
+      signal: AbortSignal.timeout(15000),
+    });
+
+    const body = await response.text();
+    let parsed;
+    try { parsed = JSON.parse(body); } catch { parsed = body; }
+
+    if (response.ok) {
+      console.log(`[bubble] Notification sent successfully (${response.status})`);
+      return { success: true, statusCode: response.status, body: parsed };
+    } else {
+      console.error(`[bubble] Notification failed — ${response.status}: ${body}`);
+      return { success: false, statusCode: response.status, body: parsed };
+    }
+  } catch (err) {
+    console.error(`[bubble] Error posting notification:`, err.message);
+    return { success: false, error: err.message };
+  }
+}
+
+module.exports = { isConfigured, postTrackingUpdate, postUserNotification };

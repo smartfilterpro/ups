@@ -136,9 +136,47 @@ async function pollSingleShipment(shipment) {
     } catch (err) {
       console.error(`[tracking] Bubble notification failed for ${shipment.tracking_number}:`, err.message);
     }
+
+    // Send user-facing notification for key status changes
+    if (shipment.user_id) {
+      notifyUserStatusChange(shipment, newStatus, latestEvent);
+    }
   }
 
   return { bubbleNotified };
+}
+
+/**
+ * Send a user-facing notification for important status changes.
+ * Fire-and-forget — errors are logged but don't affect tracking flow.
+ */
+function notifyUserStatusChange(shipment, newStatus, latestEvent) {
+  let message = null;
+
+  switch (newStatus) {
+    case 'in_transit':
+      message = `Your filter order is on the way! Track: https://www.ups.com/track?tracknum=${shipment.tracking_number}`;
+      break;
+    case 'out_for_delivery':
+      message = `Your filter order is out for delivery and will arrive today!`;
+      break;
+    case 'delivered': {
+      const location = latestEvent?.locationCity
+        ? ` in ${latestEvent.locationCity}, ${latestEvent.locationState}`
+        : '';
+      message = `Your filter order has been delivered${location}. Enjoy cleaner air!`;
+      break;
+    }
+    case 'exception':
+      message = `There's a delivery issue with your filter order (${shipment.tracking_number}). UPS will attempt redelivery.`;
+      break;
+  }
+
+  if (message) {
+    bubbleService.postUserNotification(shipment.user_id, message).catch(err => {
+      console.error(`[tracking] User notification failed for ${shipment.tracking_number}:`, err.message);
+    });
+  }
 }
 
 /**
