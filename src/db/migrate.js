@@ -109,6 +109,16 @@ const MIGRATIONS = [
       CREATE INDEX IF NOT EXISTS idx_rate_quotes_type ON rate_quotes(quote_type);
     `,
   },
+  {
+    version: 5,
+    name: 'add_user_id_to_shipments',
+    sql: `
+      ALTER TABLE shipments
+      ADD COLUMN IF NOT EXISTS user_id VARCHAR(255);
+
+      CREATE INDEX IF NOT EXISTS idx_shipments_user_id ON shipments(user_id);
+    `,
+  },
 ];
 
 async function runMigrations() {

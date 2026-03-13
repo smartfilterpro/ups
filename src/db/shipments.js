@@ -9,7 +9,7 @@ async function insertShipment({
   shipFromPostalCode,
   boxLength, boxWidth, boxHeight, boxWeight,
   filterCount, filterIds, chargesAmount, chargesCurrency, labelFormat,
-  estimatedDeliveryDate,
+  estimatedDeliveryDate, userId,
 }) {
   const { rows } = await query(
     `INSERT INTO shipments (
@@ -18,8 +18,8 @@ async function insertShipment({
       ship_from_postal_code,
       box_length, box_width, box_height, box_weight,
       filter_count, filter_ids, charges_amount, charges_currency, label_format,
-      estimated_delivery_date
-    ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22)
+      estimated_delivery_date, user_id
+    ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23)
     RETURNING *`,
     [
       trackingNumber, serviceCode, serviceName, bubbleOrderId || null,
@@ -27,7 +27,7 @@ async function insertShipment({
       shipFromPostalCode,
       boxLength, boxWidth, boxHeight, boxWeight,
       filterCount, filterIds || null, chargesAmount, chargesCurrency || 'USD', labelFormat || 'GIF',
-      estimatedDeliveryDate || null,
+      estimatedDeliveryDate || null, userId || null,
     ]
   );
   return rows[0];

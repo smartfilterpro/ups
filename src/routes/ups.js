@@ -6,6 +6,7 @@ const db = require('../db/index');
 const shipmentsDb = require('../db/shipments');
 const voidsDb = require('../db/voids');
 const rateQuotesDb = require('../db/rateQuotes');
+const { postUserNotification } = require('../services/bubbleService');
 
 // Helper: log to DB without blocking the response
 function logAsync(fn) {
@@ -753,7 +754,10 @@ router.post('/ship', async (req, res, next) => {
       shipFromCountryCode = 'US',
 
       // Label
-      labelFormat = 'GIF'
+      labelFormat = 'GIF',
+
+      // User (for notifications)
+      userId
     } = req.body;
 
     // Always use Ground shipping
@@ -945,6 +949,7 @@ router.post('/ship', async (req, res, next) => {
             chargesAmount: chargeAmount,
             chargesCurrency: chargeCurrency,
             labelFormat,
+            userId: userId || null,
           }));
         }
       }
@@ -967,6 +972,26 @@ router.post('/ship', async (req, res, next) => {
         },
         shipments: shipmentResults
       });
+    }
+
+    // Send shipment notification to user
+    if (userId && totalBoxCount > 0) {
+      const allTrackingNumbers = addressResults
+        .flatMap(a => (a.shipments || []).map(s => s.trackingNumber))
+        .filter(Boolean);
+
+      if (allTrackingNumbers.length > 0) {
+        const trackingDisplay = allTrackingNumbers.length === 1
+          ? `Track your delivery: https://www.ups.com/track?tracknum=${allTrackingNumbers[0]}`
+          : `Tracking numbers: ${allTrackingNumbers.join(', ')}`;
+
+        const message = `Your filter order has been shipped! ${trackingDisplay}`;
+
+        // Fire-and-forget — don't block the response
+        postUserNotification(userId, message).catch(err => {
+          console.error('[ups] Failed to send shipment notification:', err.message);
+        });
+      }
     }
 
     res.json({
