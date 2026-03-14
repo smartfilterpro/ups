@@ -4,30 +4,33 @@ const { query } = require('./index');
  * Insert a new shipment record after UPS label creation.
  */
 async function insertShipment({
+  userId,
   trackingNumber, serviceCode, serviceName, bubbleOrderId,
   shipToName, shipToPhone, shipToAddress, shipToCity, shipToState, shipToPostalCode, shipToCountryCode,
   shipFromPostalCode,
   boxLength, boxWidth, boxHeight, boxWeight,
   filterCount, filterIds, chargesAmount, chargesCurrency, labelFormat,
-  estimatedDeliveryDate, userId,
+  estimatedDeliveryDate,
 }) {
   const { rows } = await query(
     `INSERT INTO shipments (
+      user_id,
       tracking_number, service_code, service_name, bubble_order_id,
       ship_to_name, ship_to_phone, ship_to_address, ship_to_city, ship_to_state, ship_to_postal_code, ship_to_country_code,
       ship_from_postal_code,
       box_length, box_width, box_height, box_weight,
       filter_count, filter_ids, charges_amount, charges_currency, label_format,
-      estimated_delivery_date, user_id
+      estimated_delivery_date
     ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23)
     RETURNING *`,
     [
+      userId || null,
       trackingNumber, serviceCode, serviceName, bubbleOrderId || null,
       shipToName, shipToPhone || null, shipToAddress, shipToCity, shipToState, shipToPostalCode, shipToCountryCode || 'US',
       shipFromPostalCode,
       boxLength, boxWidth, boxHeight, boxWeight,
       filterCount, filterIds || null, chargesAmount, chargesCurrency || 'USD', labelFormat || 'GIF',
-      estimatedDeliveryDate || null, userId || null,
+      estimatedDeliveryDate || null,
     ]
   );
   return rows[0];
@@ -81,7 +84,7 @@ async function getActiveShipments() {
 /**
  * Get recent shipments with optional filters.
  */
-async function getShipments({ status, limit = 50, offset = 0, bubbleOrderId } = {}) {
+async function getShipments({ status, limit = 50, offset = 0, bubbleOrderId, userId } = {}) {
   const conditions = [];
   const params = [];
   let idx = 1;
@@ -93,6 +96,10 @@ async function getShipments({ status, limit = 50, offset = 0, bubbleOrderId } = 
   if (bubbleOrderId) {
     conditions.push(`bubble_order_id = $${idx++}`);
     params.push(bubbleOrderId);
+  }
+  if (userId) {
+    conditions.push(`user_id = $${idx++}`);
+    params.push(userId);
   }
 
   const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
